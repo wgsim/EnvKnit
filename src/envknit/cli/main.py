@@ -2509,6 +2509,90 @@ def security_update_check(
     console.print("\n[dim]Run 'envknit add <package>>=<version>' to update specific packages[/dim]")
 
 
+# ============================================================================
+# ACTIVATE / DEACTIVATE - Conda-like activation
+# ============================================================================
+
+ENVKNIT_SHIMS_DIR = Path.home() / ".envknit" / "shims"
+
+
+@app.command()
+def activate() -> None:
+    """
+    Activate envknit for the current shell session.
+
+    This enables:
+    - Shims for automatic version switching
+    - Auto-detection on directory change
+    - Prompt indicator (envknit)
+
+    Usage:
+        eval "$(envknit activate)"
+
+    To deactivate:
+        eval "$(envknit deactivate)"
+    """
+    # Output shell code that modifies the current shell
+    shims_dir = ENVKNIT_SHIMS_DIR
+
+    script = f'''
+# EnvKnit activation
+export ENVKNIT_ACTIVE=1
+export PATH="{shims_dir}:$PATH"
+
+# Save original prompt
+if [ -z "$ENVKNIT_OLD_PS1" ]; then
+    export ENVKNIT_OLD_PS1="$PS1"
+fi
+
+# Set prompt with (envknit) prefix
+export PS1="(envknit) $ENVKNIT_OLD_PS1"
+
+# chpwd hook for auto-detection
+_envknit_chpwd() {{
+    envknit auto 2>/dev/null || true
+}}
+
+# Add to chpwd_functions
+if ! (( ${{chpwd_functions[(I)_envknit_chpwd]}} )); then
+    chpwd_functions=(_envknit_chpwd $chpwd_functions)
+fi
+
+# Run initial auto
+envknit auto 2>/dev/null || true
+'''
+    print(script)
+
+
+@app.command()
+def deactivate() -> None:
+    """
+    Deactivate envknit for the current shell session.
+
+    Usage:
+        eval "$(envknit deactivate)"
+    """
+    script = '''
+# EnvKnit deactivation
+export ENVKNIT_ACTIVE=0
+
+# Remove shims from PATH
+export PATH=$(echo "$PATH" | sed 's|[^:]*\.envknit/shims:*||g' | sed 's|:$||' | sed 's|::|:|g')
+
+# Restore prompt
+if [ -n "$ENVKNIT_OLD_PS1" ]; then
+    export PS1="$ENVKNIT_OLD_PS1"
+    unset ENVKNIT_OLD_PS1
+fi
+
+# Remove chpwd hook
+chpwd_functions=(${chpwd_functions:#_envknit_chpwd})
+
+echo "envknit deactivated"
+'''
+    print(script)
+
+
 # Register security group
 app.add_command(security_cmd, name="security")
 
