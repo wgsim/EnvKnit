@@ -1,0 +1,115 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "envknit"
+version = "0.1.0"
+description = "Multi-environment package manager for Python with dependency isolation"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    { name = "EnvKnit Team" }
+]
+keywords = [
+    "environment",
+    "package-manager",
+    "dependency",
+    "isolation",
+    "conda",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Systems Administration",
+]
+dependencies = [
+    "click>=8.0.0",
+    "pyyaml>=6.0",
+    "rich>=13.0.0",
+    "packaging>=23.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+    "bandit>=1.7.0",
+    "types-PyYAML>=6.0.0",
+]
+
+[project.scripts]
+envknit = "envknit.cli.main:app"
+
+[project.urls]
+Homepage = "https://github.com/envknit/envknit"
+Documentation = "https://github.com/envknit/envknit#readme"
+Repository = "https://github.com/envknit/envknit"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/envknit"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-v --cov=envknit --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["src/envknit"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]
+
+# Ruff - Linting and formatting
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+    "ARG",    # flake8-unused-arguments
+    "SIM",    # flake8-simplify
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "B008",   # do not perform function calls in argument defaults
+    "ARG001", # unused function argument (common in callbacks)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["envknit"]
+
+# MyPy - Type checking
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+exclude = ["tests/", "examples/"]
+
+# Bandit - Security linting
+[tool.bandit]
+exclude_dirs = ["tests", "examples"]
+skips = ["B101"]  # assert_used
