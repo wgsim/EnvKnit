@@ -37,13 +37,18 @@ from envknit.isolation.import_hook import (
     set_default,
     use,
 )
+from envknit.isolation.worker import (
+    ProcessPool,
+    WorkerContext,
+    worker,
+)
 from envknit.utils.version import VERSION_INFO, __version__
 
 __all__ = [
     # Version
     "__version__",
     "VERSION_INFO",
-    # Import hook convenience API
+    # Pure-Python in-process API (ContextVar-safe)
     "enable",
     "disable",
     "use",
@@ -51,9 +56,13 @@ __all__ = [
     "set_default",
     "configure_from_lock",
     "get_manager",
+    # Subprocess worker pool API (C extensions / Category B packages)
+    "worker",
     # Classes
     "ImportHookManager",
     "VersionContext",
+    "WorkerContext",
+    "ProcessPool",
 ]
 
 # Package metadata
