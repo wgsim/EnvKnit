@@ -12,12 +12,21 @@ import contextlib
 import logging
 import sys
 from collections.abc import Sequence
+from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from importlib.abc import Loader, MetaPathFinder
 from importlib.machinery import ModuleSpec
 from importlib.util import spec_from_file_location
 from pathlib import Path
 from typing import Any
+
+# Per-context (per asyncio.Task / per thread) version mapping.
+# Maps normalized_package_name -> version string.
+# Each Task/thread gets its own independent copy — reads and writes in one
+# context never affect another, making version routing async and thread safe.
+_active_versions: ContextVar[dict[str, str]] = ContextVar(
+    "envknit_active_versions", default={}
+)
 
 from envknit.core.lock import LockFile
 from envknit.storage.store import EnvironmentStore
@@ -386,8 +395,9 @@ class VersionedFinder(MetaPathFinder):
         """
         self.registry = registry
         self.strict_mode = strict_mode
-        self._context_stack: list[dict[str, str]] = []  # Stack of {package: version}
-        self._current_context: dict[str, str] = {}  # Current package versions
+        # Legacy token stack for push_context/pop_context callers.
+        # NOTE: not async-safe — prefer VersionContext which manages tokens directly.
+        self._legacy_token_stack: list[Token] = []
 
     def set_strict_mode(self, strict: bool) -> None:
         """Enable or disable strict mode."""
@@ -458,9 +468,10 @@ class VersionedFinder(MetaPathFinder):
             base_name, version, submodule = parsed
             return self._find_spec_for_version(fullname, base_name, version, path)
 
-        # Check if package has a context version set
-        if root_normalized in self._current_context:
-            version = self._current_context[root_normalized]
+        # Check ContextVar for active version (async/thread-safe read)
+        active = _active_versions.get()
+        if root_normalized in active:
+            version = active[root_normalized]
             return self._find_spec_for_version(fullname, root_package, version, path)
 
         # Strict mode: check if this is a registered package without version
@@ -549,45 +560,46 @@ class VersionedFinder(MetaPathFinder):
 
     def push_context(self, package: str, version: str) -> None:
         """
-        Push a version context for a package.
+        Push a version context for a package (legacy path, not async-safe).
+
+        Prefer VersionContext which manages ContextVar tokens directly.
 
         Args:
             package: Package name
             version: Version to use
         """
         normalized = package.lower().replace("-", "_")
-
-        # Save current context
-        self._context_stack.append(self._current_context.copy())
-
-        # Set new version
-        self._current_context[normalized] = version
+        current = _active_versions.get()
+        token = _active_versions.set({**current, normalized: version})
+        self._legacy_token_stack.append(token)
         logger.debug(f"Pushed context: {package}@{version}")
 
     def pop_context(self) -> dict[str, str] | None:
         """
-        Pop the last version context.
+        Pop the last version context pushed via push_context (legacy path).
 
         Returns:
-            Previous context or None if stack is empty
+            Restored context dict or None if stack is empty
         """
-        if self._context_stack:
-            prev = self._context_stack.pop()
-            self._current_context = prev
-            logger.debug(f"Popped context, restored: {self._current_context}")
-            return prev
+        if self._legacy_token_stack:
+            token = self._legacy_token_stack.pop()
+            _active_versions.reset(token)
+            restored = _active_versions.get()
+            logger.debug(f"Popped context, restored: {restored}")
+            return restored
         return None
 
     def set_version(self, package: str, version: str) -> None:
         """
-        Set the version context for a package.
+        Set the version context for a package (mutates current context in-place).
 
         Args:
             package: Package name
             version: Version to use
         """
         normalized = package.lower().replace("-", "_")
-        self._current_context[normalized] = version
+        current = _active_versions.get()
+        _active_versions.set({**current, normalized: version})
         logger.debug(f"Set version context: {package}@{version}")
 
     def clear_version(self, package: str) -> None:
@@ -598,13 +610,16 @@ class VersionedFinder(MetaPathFinder):
             package: Package name
         """
         normalized = package.lower().replace("-", "_")
-        self._current_context.pop(normalized, None)
+        current = _active_versions.get()
+        if normalized in current:
+            updated = {k: v for k, v in current.items() if k != normalized}
+            _active_versions.set(updated)
         logger.debug(f"Cleared version context for {package}")
 
     def clear_all_contexts(self) -> None:
-        """Clear all version contexts."""
-        self._context_stack.clear()
-        self._current_context.clear()
+        """Clear all version contexts in the current context."""
+        self._legacy_token_stack.clear()
+        _active_versions.set({})
         logger.debug("Cleared all version contexts")
 
 
@@ -909,25 +924,34 @@ class VersionContext:
 
     def __enter__(self) -> VersionContext:
         """Enter the context, setting the package version."""
-        pkg = self.name.lower()
-        # Save and clear sys.modules for this package so Python doesn't return
-        # a stale cached version when `import pkg` is called inside the block.
+        pkg = self.name.lower().replace("-", "_")
+
+        # sys.modules: save and clear so Python calls find_spec instead of
+        # returning a stale cached version. (Category A fix: routing is now
+        # ContextVar-safe; sys.modules isolation is still needed for caching.)
         self._saved_modules: dict[str, Any] = {
             k: sys.modules.pop(k)
             for k in list(sys.modules)
             if k == pkg or k.startswith(pkg + ".")
         }
-        self.finder.push_context(self.name, self.version)
+
+        # ContextVar: set version for this context (async/thread-safe).
+        # Each asyncio.Task inherits an independent copy of the context, so
+        # this set does not affect other Tasks or threads.
+        current = _active_versions.get()
+        self._ctx_token: Token = _active_versions.set({**current, pkg: self.version})
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """Exit the context, restoring the previous version."""
-        self.finder.pop_context()
-        pkg = self.name.lower()
-        # Remove whatever this context loaded under the public name
+        # Atomically restore ContextVar to state before __enter__.
+        _active_versions.reset(self._ctx_token)
+
+        pkg = self.name.lower().replace("-", "_")
+        # Remove modules loaded by this context under the public package name.
         for k in [k for k in sys.modules if k == pkg or k.startswith(pkg + ".")]:
             del sys.modules[k]
-        # Restore pre-block state
+        # Restore pre-block sys.modules state.
         sys.modules.update(self._saved_modules)
         return None
 

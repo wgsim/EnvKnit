@@ -20,6 +20,7 @@ from envknit.isolation.import_hook import (
     VersionContext,
     IsolationImporter,
     IsolationContext,
+    _active_versions,
     enable,
     disable,
     use,
@@ -115,36 +116,37 @@ class TestVersionedFinder:
     """Tests for VersionedFinder class."""
 
     def test_context_stack(self):
-        """Test context stack operations."""
+        """Test context stack operations via ContextVar."""
         registry = VersionRegistry()
         finder = VersionedFinder(registry)
 
-        # Push contexts
         finder.push_context("numpy", "1.26.4")
-        assert finder._current_context.get("numpy") == "1.26.4"
+        assert _active_versions.get().get("numpy") == "1.26.4"
 
         finder.push_context("pandas", "2.0.0")
-        assert finder._current_context.get("numpy") == "1.26.4"
-        assert finder._current_context.get("pandas") == "2.0.0"
+        assert _active_versions.get().get("numpy") == "1.26.4"
+        assert _active_versions.get().get("pandas") == "2.0.0"
 
-        # Pop context
         finder.pop_context()
-        assert "pandas" not in finder._current_context
-        assert finder._current_context.get("numpy") == "1.26.4"
+        assert "pandas" not in _active_versions.get()
+        assert _active_versions.get().get("numpy") == "1.26.4"
+
+        finder.pop_context()
+        assert "numpy" not in _active_versions.get()
 
     def test_set_version(self):
-        """Test setting version directly."""
+        """Test setting version directly via ContextVar."""
         registry = VersionRegistry()
         finder = VersionedFinder(registry)
 
         finder.set_version("numpy", "1.26.4")
-        assert finder._current_context.get("numpy") == "1.26.4"
+        assert _active_versions.get().get("numpy") == "1.26.4"
 
         finder.clear_version("numpy")
-        assert "numpy" not in finder._current_context
+        assert "numpy" not in _active_versions.get()
 
     def test_clear_all_contexts(self):
-        """Test clearing all contexts."""
+        """Test clearing all contexts via ContextVar."""
         registry = VersionRegistry()
         finder = VersionedFinder(registry)
 
@@ -153,39 +155,39 @@ class TestVersionedFinder:
 
         finder.clear_all_contexts()
 
-        assert not finder._current_context
-        assert not finder._context_stack
+        assert not _active_versions.get()
+        assert not finder._legacy_token_stack
 
 
 class TestVersionContext:
     """Tests for VersionContext context manager."""
 
     def test_context_manager(self):
-        """Test using VersionContext as context manager."""
+        """Test using VersionContext as context manager via ContextVar."""
         registry = VersionRegistry()
         finder = VersionedFinder(registry)
 
-        assert not finder._current_context
+        assert not _active_versions.get()
 
         with VersionContext(finder, "numpy", "1.26.4"):
-            assert finder._current_context.get("numpy") == "1.26.4"
+            assert _active_versions.get().get("numpy") == "1.26.4"
 
-        assert "numpy" not in finder._current_context
+        assert "numpy" not in _active_versions.get()
 
     def test_nested_contexts(self):
-        """Test nested context managers."""
+        """Test nested context managers restore correctly via ContextVar tokens."""
         registry = VersionRegistry()
         finder = VersionedFinder(registry)
 
         with VersionContext(finder, "numpy", "1.26.4"):
-            assert finder._current_context.get("numpy") == "1.26.4"
+            assert _active_versions.get().get("numpy") == "1.26.4"
 
             with VersionContext(finder, "numpy", "2.0.0"):
-                assert finder._current_context.get("numpy") == "2.0.0"
+                assert _active_versions.get().get("numpy") == "2.0.0"
 
-            assert finder._current_context.get("numpy") == "1.26.4"
+            assert _active_versions.get().get("numpy") == "1.26.4"
 
-        assert "numpy" not in finder._current_context
+        assert "numpy" not in _active_versions.get()
 
 
 class TestImportHookManager:
@@ -307,9 +309,9 @@ class TestIntegration:
         assert manager.registry.get_default_version("numpy") == "1.26.4"
 
         with manager.use("numpy", "2.0.0"):
-            assert manager.finder._current_context.get("numpy") == "2.0.0"
+            assert _active_versions.get().get("numpy") == "2.0.0"
 
-        assert "numpy" not in manager.finder._current_context
+        assert "numpy" not in _active_versions.get()
         manager.uninstall()
 
 
@@ -409,3 +411,95 @@ class TestVersionedImportWithFakePackages:
 
         # Cleanup
         del sys.modules["mylib_1_0_0"]
+
+
+# ── ContextVar isolation: async and thread safety ─────────────────────────────
+
+class TestContextVarIsolation:
+    """Verify that _active_versions ContextVar isolates correctly across
+    async tasks and threads — the core guarantee of Option A migration."""
+
+    def test_async_tasks_see_independent_versions(self):
+        """Two concurrent async tasks must route to their own versions."""
+        import asyncio
+
+        registry = VersionRegistry()
+        finder = VersionedFinder(registry)
+        results: dict[str, str | None] = {}
+
+        async def task_a():
+            with VersionContext(finder, "numpy", "1.21.0"):
+                await asyncio.sleep(0)  # yield, let task_b run
+                results["a"] = _active_versions.get().get("numpy")
+
+        async def task_b():
+            with VersionContext(finder, "numpy", "1.25.0"):
+                await asyncio.sleep(0)
+                results["b"] = _active_versions.get().get("numpy")
+
+        async def run():
+            await asyncio.gather(task_a(), task_b())
+
+        asyncio.run(run())
+        assert results["a"] == "1.21.0", f"task_a saw {results['a']}"
+        assert results["b"] == "1.25.0", f"task_b saw {results['b']}"
+
+    def test_thread_sees_independent_version(self):
+        """A spawned thread inherits the spawning context but its changes
+        do not leak back into the main thread."""
+        import threading
+
+        registry = VersionRegistry()
+        finder = VersionedFinder(registry)
+        thread_saw: list[str | None] = []
+        main_saw_before: list[str | None] = []
+        main_saw_after: list[str | None] = []
+
+        def worker():
+            with VersionContext(finder, "numpy", "2.0.0"):
+                thread_saw.append(_active_versions.get().get("numpy"))
+
+        # Main thread has no version set
+        main_saw_before.append(_active_versions.get().get("numpy"))
+
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join()
+
+        main_saw_after.append(_active_versions.get().get("numpy"))
+
+        assert thread_saw[0] == "2.0.0"
+        assert main_saw_before[0] is None, "main had no version before"
+        assert main_saw_after[0] is None, "thread context must not leak to main"
+
+    def test_nested_async_contexts_restore_correctly(self):
+        """Nested VersionContexts in the same async task restore in order."""
+        import asyncio
+
+        registry = VersionRegistry()
+        finder = VersionedFinder(registry)
+        snapshots: list[str | None] = []
+
+        async def run():
+            with VersionContext(finder, "numpy", "1.21.0"):
+                snapshots.append(_active_versions.get().get("numpy"))
+                with VersionContext(finder, "numpy", "2.0.0"):
+                    snapshots.append(_active_versions.get().get("numpy"))
+                snapshots.append(_active_versions.get().get("numpy"))
+            snapshots.append(_active_versions.get().get("numpy"))
+
+        asyncio.run(run())
+        assert snapshots == ["1.21.0", "2.0.0", "1.21.0", None]
+
+    def test_context_var_reset_on_exception(self):
+        """ContextVar must be restored even if the block raises."""
+        registry = VersionRegistry()
+        finder = VersionedFinder(registry)
+
+        try:
+            with VersionContext(finder, "numpy", "1.21.0"):
+                raise RuntimeError("intentional")
+        except RuntimeError:
+            pass
+
+        assert "numpy" not in _active_versions.get()
