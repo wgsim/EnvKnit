@@ -31,13 +31,15 @@ classifiers = [
     "Topic :: System :: Systems Administration",
 ]
 dependencies = [
-    "click>=8.0.0",
-    "pyyaml>=6.0",
-    "rich>=13.0.0",
     "packaging>=23.0",
 ]
 
 [project.optional-dependencies]
+cli = [
+    "click>=8.0.0",
+    "pyyaml>=6.0",
+    "rich>=13.0.0",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
@@ -48,6 +50,7 @@ dev = [
 ]
 
 [project.scripts]
+# Requires envknit[cli] extras (click, rich, pyyaml)
 envknit = "envknit.cli.main:app"
 
 [project.urls]

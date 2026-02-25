@@ -7,12 +7,18 @@ Defines all command-line commands and their implementations.
 from pathlib import Path
 from typing import Any
 
-import click
-import yaml
-from rich.console import Console
-from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
-from rich.prompt import Confirm, Prompt
-from rich.table import Table
+try:
+    import click
+    import yaml
+    from rich.console import Console
+    from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
+    from rich.prompt import Confirm, Prompt
+    from rich.table import Table
+except ImportError as e:
+    raise SystemExit(
+        f"CLI dependencies not installed. Run: pip install envknit[cli]\n"
+        f"Missing: {e.name}"
+    ) from None
 
 from envknit import __version__
 from envknit.backends.base import Backend, PackageInfo

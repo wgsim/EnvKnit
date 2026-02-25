@@ -296,28 +296,116 @@ class TestIntegration:
         """Test complete workflow with registry and finder."""
         ImportHookManager._instance = None
 
-        # Create manager
         manager = ImportHookManager.get_instance()
-        manager.uninstall()  # Start clean
+        manager.uninstall()
 
-        # Register packages
         test_path = Path("/tmp/test/env")
         manager.register_package("numpy", "1.26.4", path=test_path)
         manager.register_package("numpy", "2.0.0", path=test_path)
-
-        # Set default
         manager.set_default_version("numpy", "1.26.4")
 
-        # Check default
-        assert manager.registry.get_default_version("numpy") == "1.26.0" or \
-               manager.registry.get_default_version("numpy") == "1.26.4"
+        assert manager.registry.get_default_version("numpy") == "1.26.4"
 
-        # Test context
         with manager.use("numpy", "2.0.0"):
             assert manager.finder._current_context.get("numpy") == "2.0.0"
 
-        # Context should be cleared
         assert "numpy" not in manager.finder._current_context
+        manager.uninstall()
+
+
+# ── Fake-package paths ────────────────────────────────────────────────────────
+
+_FAKE_PKGS = Path(__file__).parent.parent / "poc" / "fake_packages"
+_V1 = _FAKE_PKGS / "mylib_v1"
+_V2 = _FAKE_PKGS / "mylib_v2"
+
+
+@pytest.mark.skipif(not _V1.exists(), reason="poc/fake_packages not found")
+class TestVersionedImportWithFakePackages:
+    """
+    Integration tests that perform actual imports from fake package directories.
+    Verifies the fixed _find_spec_for_version and VersionContext save/restore.
+    """
+
+    @pytest.fixture(autouse=True)
+    def fresh_manager(self):
+        """Give each test a clean ImportHookManager and no stale sys.modules."""
+        ImportHookManager._instance = None
+        # Remove any mylib entries left by previous tests
+        for key in [k for k in sys.modules if k == "mylib" or k.startswith("mylib.")]:
+            del sys.modules[key]
+        yield
+        # Teardown
+        manager = ImportHookManager.get_instance()
+        manager.uninstall()
+        for key in [k for k in sys.modules if k == "mylib" or k.startswith("mylib.")]:
+            del sys.modules[key]
+
+    def _manager(self) -> "ImportHookManager":
+        m = ImportHookManager.get_instance()
+        m.install()
+        m.register_package("mylib", "1.0.0", path=_V1)
+        m.register_package("mylib", "2.0.0", path=_V2)
+        return m
+
+    def test_use_context_loads_correct_version(self):
+        """use() routes `import mylib` to the registered version."""
+        m = self._manager()
+
+        with m.use("mylib", "1.0.0"):
+            import mylib
+            assert mylib.__version__ == "1.0.0"
+
+        with m.use("mylib", "2.0.0"):
+            import mylib
+            assert mylib.__version__ == "2.0.0"
+
+    def test_sequential_contexts_are_independent(self):
+        """Two sequential use() blocks each get their own version."""
+        m = self._manager()
+        results = []
+
+        with m.use("mylib", "1.0.0"):
+            import mylib
+            results.append(mylib.__version__)
+
+        with m.use("mylib", "2.0.0"):
+            import mylib
+            results.append(mylib.__version__)
+
+        assert results == ["1.0.0", "2.0.0"]
+
+    def test_nested_contexts_inner_wins(self):
+        """Inner use() context overrides the outer one."""
+        m = self._manager()
+
+        with m.use("mylib", "1.0.0"):
+            import mylib as outer
+            assert outer.__version__ == "1.0.0"
+
+            with m.use("mylib", "2.0.0"):
+                import mylib as inner
+                assert inner.__version__ == "2.0.0"
+
+            # Held reference is still valid
+            assert outer.__version__ == "1.0.0"
+
+    def test_sys_modules_not_leaked(self):
+        """mylib must not remain in sys.modules after context exits."""
+        m = self._manager()
+
+        with m.use("mylib", "1.0.0"):
+            import mylib  # noqa: F401
+
+        assert "mylib" not in sys.modules
+
+    def test_versioned_name_syntax(self):
+        """import mylib_1_0_0 resolves to the v1 install path."""
+        m = self._manager()
+
+        import mylib_1_0_0  # noqa: F401
+        mod = sys.modules["mylib_1_0_0"]
+        assert mod.__version__ == "1.0.0"
 
         # Cleanup
-        manager.uninstall()
+        del sys.modules["mylib_1_0_0"]

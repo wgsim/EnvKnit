@@ -16,7 +16,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import yaml
+# yaml imported lazily inside methods that need it (optional dep)
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +228,7 @@ def get_environment_path(project_root: Path, tool_name: str) -> str:
         return None
 
     try:
+        import yaml
         with open(lock_file) as f:
             lock_data = yaml.safe_load(f)
     except Exception:

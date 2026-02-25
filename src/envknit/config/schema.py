@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import yaml
+# yaml imported lazily inside methods that need it (optional dep)
 
 
 @dataclass
@@ -98,6 +98,7 @@ class Config:
         if not path.exists():
             raise FileNotFoundError(f"Configuration file not found: {path}")
 
+        import yaml
         with open(path) as f:
             data = yaml.safe_load(f)
 
@@ -148,6 +149,7 @@ class Config:
         Args:
             path: Path where to save envknit.yaml
         """
+        import yaml
         with open(path, "w") as f:
             yaml.dump(self.to_dict(), f, default_flow_style=False, sort_keys=False)
 

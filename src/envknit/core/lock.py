@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import yaml
+# yaml imported lazily inside methods that need it (optional dep)
 
 from envknit.config.schema import Config
 from envknit.core.resolver import Resolution
@@ -691,6 +691,7 @@ class LockFile:
         if not self.path.exists():
             raise FileNotFoundError(f"Lock file not found: {self.path}")
 
+        import yaml
         with open(self.path) as f:
             data = yaml.safe_load(f)
 
@@ -760,6 +761,7 @@ class LockFile:
         # Ensure parent directory exists
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
+        import yaml
         with open(self.path, "w") as f:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
 
@@ -831,20 +833,6 @@ class LockFile:
             if pkg.name.lower() == name_lower:
                 return pkg
         return None
-        """
-        Get a specific package by name.
-
-        Args:
-            name: Package name to look up
-
-        Returns:
-            LockedPackage if found, None otherwise
-        """
-        name_lower = name.lower()
-        for pkg in self.packages:
-            if pkg.name.lower() == name_lower:
-                return pkg
-        return None
 
     def get_selection_reason(self, name: str) -> SelectionReason | None:
         """
@@ -904,24 +892,19 @@ class LockFile:
         Returns:
             List of package names in topological order
         """
-        # Build adjacency list
+        # Build adjacency list in dependency→dependent direction
+        # (so Kahn's processes dependency-leaves first)
         graph: dict[str, set] = {pkg.name: set() for pkg in self.packages}
         for edge in self.dependency_graph.edges:
-            if edge.from_pkg in graph:
-                graph[edge.from_pkg].add(edge.to_pkg)
+            if edge.to_pkg in graph and edge.from_pkg in graph:
+                graph[edge.to_pkg].add(edge.from_pkg)
 
         # Topological sort using Kahn's algorithm
         in_degree: dict[str, int] = dict.fromkeys(graph, 0)
         for _, deps in graph.items():
             for dep in deps:
                 if dep in in_degree:
-                    in_degree[dep] += 0  # Ensure dep is in in_degree
-
-        # Actually, we want dependencies first, so count incoming edges
-        for pkg in graph:
-            for dep in graph[pkg]:
-                if dep in in_degree:
-                    in_degree[dep] = in_degree.get(dep, 0) + 1
+                    in_degree[dep] += 1
 
         # Find all nodes with no incoming edges
         queue = [pkg for pkg, degree in in_degree.items() if degree == 0]
@@ -1055,6 +1038,7 @@ class LegacyLockFile:
         if not path.exists():
             raise FileNotFoundError(f"Lock file not found: {path}")
 
+        import yaml
         with open(path) as f:
             data = yaml.safe_load(f)
 
@@ -1099,5 +1083,6 @@ class LegacyLockFile:
             },
         }
 
+        import yaml
         with open(path, "w") as f:
             yaml.dump(data, f, default_flow_style=False, sort_keys=True)

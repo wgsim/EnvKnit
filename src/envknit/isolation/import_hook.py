@@ -496,34 +496,56 @@ class VersionedFinder(MetaPathFinder):
         root_normalized = root_package.lower().replace("-", "_")
         pkg_path = self.registry.get_package_path(root_normalized, version)
         if pkg_path is None:
-            # Try to register from store
             try:
                 pkg_path = self.registry.register_package(root_package, version)
             except ValueError:
                 logger.warning(f"Package {root_package}=={version} not found")
                 return None
 
-        # Create loader
-        loader = VersionedLoader(
-            fullname=fullname,
-            path=pkg_path,
-            version=version,
-            registry=self.registry,
-        )
+        # For versioned-name imports (e.g. "mylib_1_0_0"), fullname differs from
+        # root_package ("mylib"). Use root_package for on-disk path resolution
+        # but keep fullname as the module's registered name in sys.modules.
+        if fullname == root_package or fullname.startswith(root_package + "."):
+            resolve_name = fullname  # context-based: fullname is the real package name
+        else:
+            # Versioned-name: "mylib_1_0_0" or "mylib_1_0_0.sub"
+            sub = ".".join(fullname.split(".")[1:])
+            resolve_name = root_package + ("." + sub if sub else "")
 
-        # Find the actual module file
-        module_path = loader._resolve_module_path()
+        module_path = self._resolve_module_path(pkg_path, resolve_name)
         if module_path is None:
             return None
 
-        # Create spec
-        spec = spec_from_file_location(
-            name=fullname,
-            location=module_path,
-            loader=loader,
+        is_pkg = module_path.name == "__init__.py"
+        return spec_from_file_location(
+            fullname,
+            module_path,
+            submodule_search_locations=[str(module_path.parent)] if is_pkg else None,
         )
 
-        return spec
+    def _resolve_module_path(self, base_path: Path, fullname: str) -> Path | None:
+        """Resolve the .py / .so file for fullname inside base_path."""
+        import importlib.machinery
+
+        parts = fullname.split(".")
+        cur = base_path
+        for i, part in enumerate(parts):
+            pkg_dir = cur / part
+            init = pkg_dir / "__init__.py"
+            if init.exists():
+                cur = pkg_dir
+                if i == len(parts) - 1:
+                    return init
+                continue
+            py = cur / f"{part}.py"
+            if py.exists():
+                return py
+            for suffix in importlib.machinery.EXTENSION_SUFFIXES:
+                ext = cur / f"{part}{suffix}"
+                if ext.exists():
+                    return ext
+            return None
+        return None
 
     def push_context(self, package: str, version: str) -> None:
         """
@@ -887,12 +909,26 @@ class VersionContext:
 
     def __enter__(self) -> VersionContext:
         """Enter the context, setting the package version."""
+        pkg = self.name.lower()
+        # Save and clear sys.modules for this package so Python doesn't return
+        # a stale cached version when `import pkg` is called inside the block.
+        self._saved_modules: dict[str, Any] = {
+            k: sys.modules.pop(k)
+            for k in list(sys.modules)
+            if k == pkg or k.startswith(pkg + ".")
+        }
         self.finder.push_context(self.name, self.version)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """Exit the context, restoring the previous version."""
         self.finder.pop_context()
+        pkg = self.name.lower()
+        # Remove whatever this context loaded under the public name
+        for k in [k for k in sys.modules if k == pkg or k.startswith(pkg + ".")]:
+            del sys.modules[k]
+        # Restore pre-block state
+        sys.modules.update(self._saved_modules)
         return None
 
 
