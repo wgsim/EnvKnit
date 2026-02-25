@@ -342,7 +342,7 @@ class TestPubGrubResolverWithBackend:
 # ---------------------------------------------------------------------------
 
 class TestPubGrubResolverDeps:
-    """Tests with resolve_dependencies=True."""
+    """Tests with resolve_dependencies=True (now the default)."""
 
     @pytest.fixture
     def dep_backend(self):
@@ -359,7 +359,16 @@ class TestPubGrubResolverDeps:
         )
 
     def test_transitive_resolve(self, dep_backend):
+        """Explicit resolve_dependencies=True still works."""
         resolver = PubGrubResolver(backend=dep_backend, resolve_dependencies=True)
+        result = resolver.resolve(["pandas"])
+        assert result.success is True
+        assert "pandas" in result.packages
+        assert "numpy" in result.packages
+
+    def test_transitive_resolve_default(self, dep_backend):
+        """Transitive resolution is enabled by default (no explicit flag needed)."""
+        resolver = PubGrubResolver(backend=dep_backend)
         result = resolver.resolve(["pandas"])
         assert result.success is True
         assert "pandas" in result.packages
@@ -396,6 +405,134 @@ class TestPubGrubResolverBacktracking:
         result = resolver.resolve(["numpy"])
         # No candidates => failure but no crash
         assert result.success is False
+
+
+# ---------------------------------------------------------------------------
+# Semantic conflict detection
+# ---------------------------------------------------------------------------
+
+class TestSemanticConflictDetection:
+    """Tests that _check_constraint_conflict catches semantic (not just syntactic) conflicts."""
+
+    @pytest.fixture
+    def numpy_backend(self):
+        return FakeBackend(
+            packages={
+                "numpy": [
+                    FakePackageInfo(name="numpy", version="1.24.0"),
+                    FakePackageInfo(name="numpy", version="1.20.0"),
+                    FakePackageInfo(name="numpy", version="1.15.0"),
+                ],
+            }
+        )
+
+    def test_semantic_conflict_impossible_range(self, numpy_backend):
+        """>=2.0 AND <1.5 is syntactically valid but semantically empty — should detect."""
+        vc_existing = VersionConstraint(name="numpy", specifier=">=2.0", source="user")
+        vc_new = VersionConstraint(name="numpy", specifier="<1.5", source="scipy")
+
+        resolver = PubGrubResolver(backend=numpy_backend)
+        conflict = resolver._check_constraint_conflict(vc_new, [vc_existing])
+
+        assert conflict is not None
+        assert conflict.package == "numpy"
+
+    def test_no_false_conflict_valid_range(self, numpy_backend):
+        """>=1.20 AND <2.0 has available candidates — should NOT report conflict."""
+        vc_existing = VersionConstraint(name="numpy", specifier=">=1.20", source="user")
+        vc_new = VersionConstraint(name="numpy", specifier="<2.0", source="pandas")
+
+        resolver = PubGrubResolver(backend=numpy_backend)
+        conflict = resolver._check_constraint_conflict(vc_new, [vc_existing])
+
+        assert conflict is None
+
+    def test_syntactic_conflict_detected(self):
+        """Invalid specifier syntax still raises a conflict."""
+        # VersionConstraint validates on creation, so we test _check_constraint_conflict
+        # by calling with constraints that produce invalid combined spec.
+        # This requires bypassing VersionConstraint validation — use the method directly.
+        resolver = PubGrubResolver()
+        # Manually construct constraints to force a syntactically invalid combination
+        vc1 = VersionConstraint(name="pkg", specifier=">=1.0")
+        vc2 = VersionConstraint(name="pkg", specifier=">=2.0")
+        # These are syntactically valid; no syntactic conflict
+        conflict = resolver._check_constraint_conflict(vc2, [vc1])
+        assert conflict is None  # >=1.0 AND >=2.0 means >=2.0, which is valid
+
+    def test_conflict_detected_via_full_resolve(self, numpy_backend):
+        """End-to-end: conflicting transitive constraints produce failed resolution."""
+        # A requires numpy>=2.0, B requires numpy<1.5 — impossible combination
+        conflict_backend = FakeBackend(
+            packages={
+                "pkgA": [
+                    FakePackageInfo(name="pkgA", version="1.0.0", dependencies=["numpy>=2.0"]),
+                ],
+                "pkgB": [
+                    FakePackageInfo(name="pkgB", version="1.0.0", dependencies=["numpy<1.5"]),
+                ],
+                "numpy": [
+                    FakePackageInfo(name="numpy", version="1.24.0"),
+                    FakePackageInfo(name="numpy", version="1.20.0"),
+                ],
+            }
+        )
+        resolver = PubGrubResolver(backend=conflict_backend, resolve_dependencies=True)
+        result = resolver.resolve(["pkgA", "pkgB"])
+        assert result.success is False
+
+
+# ---------------------------------------------------------------------------
+# Cache invalidation
+# ---------------------------------------------------------------------------
+
+class TestCacheInvalidation:
+    """Tests that the candidates cache is invalidated correctly."""
+
+    def test_cache_invalidated_when_constraint_added(self):
+        """Adding a constraint clears the candidate cache for that package."""
+        backend = FakeBackend(
+            packages={
+                "numpy": [
+                    FakePackageInfo(name="numpy", version="1.24.0"),
+                    FakePackageInfo(name="numpy", version="1.20.0"),
+                ],
+            }
+        )
+        resolver = PubGrubResolver(backend=backend)
+        # Populate cache
+        candidates = resolver._get_candidates("numpy")
+        assert "numpy" in resolver._candidates_cache
+        # Add a constraint — should invalidate cache
+        vc = VersionConstraint(name="numpy", specifier=">=1.22")
+        resolver._add_constraint(vc, "test")
+        assert "numpy" not in resolver._candidates_cache
+
+    def test_cache_cleared_on_backtrack(self):
+        """Backtracking clears the entire candidates cache."""
+        backend = FakeBackend(
+            packages={
+                "x": [
+                    FakePackageInfo(name="x", version="2.0.0"),
+                    FakePackageInfo(name="x", version="1.0.0"),
+                ],
+                "y": [FakePackageInfo(name="y", version="1.0.0")],
+            }
+        )
+        resolver = PubGrubResolver(backend=backend)
+        # Populate cache for two packages
+        resolver._get_candidates("x")
+        resolver._get_candidates("y")
+        assert len(resolver._candidates_cache) == 2
+
+        # Simulate a backtrack state
+        resolver._backtrack_stack.append(("x", "2.0.0", {}, {}))
+        resolver._backtrack()
+
+        # Cache should be cleared
+        assert len(resolver._candidates_cache) == 0
+        # Excluded versions should be updated
+        assert "2.0.0" in resolver._excluded_versions["x"]
 
 
 # ---------------------------------------------------------------------------

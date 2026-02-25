@@ -227,7 +227,7 @@ class PubGrubResolver:
             print(result.packages)  # {"numpy": "1.26.4", "pandas": "2.1.0", ...}
     """
 
-    def __init__(self, backend: object | None = None, resolve_dependencies: bool = False):
+    def __init__(self, backend: object | None = None, resolve_dependencies: bool = True):
         """
         Initialize the resolver.
 
@@ -235,7 +235,7 @@ class PubGrubResolver:
             backend: Optional backend for fetching package info.
                      Must have resolve(requirement) -> list[PackageInfo] method.
             resolve_dependencies: Whether to resolve transitive dependencies.
-                                  Default False (let conda handle dependencies).
+                                  Default True.
         """
         self.backend = backend
         self._resolve_dependencies = resolve_dependencies
@@ -244,6 +244,7 @@ class PubGrubResolver:
         self._constraints: dict[str, list[VersionConstraint]] = defaultdict(list)
         self._selections: dict[str, str] = {}
         self._candidates_cache: dict[str, list[PackageCandidate]] = {}
+        self._excluded_versions: dict[str, set] = defaultdict(set)
         self._graph = DependencyGraph()
         self._backtrack_stack: list[tuple[str, str, dict, dict]] = []
 
@@ -317,6 +318,7 @@ class PubGrubResolver:
         self._constraints = defaultdict(list)
         self._selections = {}
         self._candidates_cache = {}
+        self._excluded_versions = defaultdict(set)
         self._graph = DependencyGraph()
         self._backtrack_stack = []
 
@@ -381,6 +383,8 @@ class PubGrubResolver:
     ) -> None:
         """Add a constraint to the constraint pool."""
         self._constraints[constraint.name].append(constraint)
+        # Invalidate cache so next _get_candidates re-filters with updated constraints
+        self._candidates_cache.pop(constraint.name, None)
 
     def _get_candidates(self, package: str) -> list[PackageCandidate]:
         """Get available candidates for a package."""
@@ -415,6 +419,11 @@ class PubGrubResolver:
 
         # Sort by version (descending)
         candidates.sort()
+
+        # Filter out versions excluded by prior backtracking
+        excluded = self._excluded_versions.get(package, set())
+        if excluded:
+            candidates = [c for c in candidates if c.version not in excluded]
 
         self._candidates_cache[package] = candidates
         return candidates
@@ -563,25 +572,53 @@ class PubGrubResolver:
     def _check_constraint_conflict(
         self, new_constraint: VersionConstraint, existing: list[VersionConstraint]
     ) -> Conflict | None:
-        """Check if a new constraint conflicts with existing ones."""
-        all_constraints = existing + [new_constraint]
+        """
+        Check if a new constraint conflicts with existing ones.
 
-        # Find intersection of all constraints
+        Two-stage check:
+        1. Syntactic: combined specifier must parse without InvalidSpecifier.
+        2. Semantic: if a backend is available and returns candidates, at least
+           one candidate must satisfy all constraints (catches cases like
+           ">=2.0" AND "<1.5" which are syntactically valid but semantically empty).
+        """
+        all_constraints = existing + [new_constraint]
         combined_spec = ",".join(c.specifier for c in all_constraints if c.specifier)
 
+        # Stage 1: syntactic validity
         try:
             SpecifierSet(combined_spec)
-            # Check if any version could satisfy
-            # This is simplified; in practice, you'd check against available versions
-            return None
         except InvalidSpecifier:
-            # Constraints are incompatible
             return Conflict(
                 package=new_constraint.name,
                 constraints=[(c, c.source) for c in all_constraints],
                 message=f"Incompatible version constraints for {new_constraint.name}",
                 suggestion=self._suggest_resolution(all_constraints),
             )
+
+        # Stage 2: semantic check against available candidates
+        if self.backend and hasattr(self.backend, "resolve"):
+            try:
+                raw_candidates = self.backend.resolve(new_constraint.name)
+            except Exception:
+                raw_candidates = []
+
+            if raw_candidates:
+                any_match = any(
+                    all(c.matches(info.version) for c in all_constraints if c.specifier)
+                    for info in raw_candidates
+                )
+                if not any_match:
+                    return Conflict(
+                        package=new_constraint.name,
+                        constraints=[(c, c.source) for c in all_constraints],
+                        message=(
+                            f"No available version of {new_constraint.name} satisfies "
+                            f"all constraints: {combined_spec}"
+                        ),
+                        suggestion=self._suggest_resolution(all_constraints),
+                    )
+
+        return None
 
     def _suggest_resolution(
         self, constraints: list[VersionConstraint]
@@ -645,23 +682,26 @@ class PubGrubResolver:
         self._selections = selections
         self._constraints = defaultdict(list, {k: list(v) for k, v in constraints.items()})
 
-        # Remove the problematic version from candidates
-        if package in self._candidates_cache:
-            self._candidates_cache[package] = [
-                c for c in self._candidates_cache[package]
-                if c.version != version
-            ]
+        # Permanently exclude the failed version to prevent re-selection
+        self._excluded_versions[package].add(version)
 
-        # Rebuild graph
+        # Clear the entire candidates cache: entries were built with constraints
+        # from selections that were just rolled back, so they are now stale.
+        # _get_candidates will repopulate on demand, respecting excluded_versions.
+        self._candidates_cache.clear()
+
+        # Rebuild graph from the restored selections
         self._graph = DependencyGraph()
         for pkg, ver in self._selections.items():
-            # Get dependencies from cache if available
             deps = []
-            if pkg in self._candidates_cache:
-                for c in self._candidates_cache[pkg]:
-                    if c.version == ver:
-                        deps = c.dependencies
-                        break
+            if self.backend and hasattr(self.backend, "resolve"):
+                try:
+                    for info in self.backend.resolve(pkg):
+                        if info.version == ver:
+                            deps = info.dependencies
+                            break
+                except Exception:
+                    pass
             self._graph.add_package(pkg, ver, deps)
 
         return True
