@@ -40,6 +40,14 @@ cli = [
     "pyyaml>=6.0",
     "rich>=13.0.0",
 ]
+build = [
+    # CLI extras are required at build time so PyInstaller can analyse imports
+    "click>=8.0.0",
+    "pyyaml>=6.0",
+    "rich>=13.0.0",
+    # PyInstaller 6.x — produces single-file executables for Linux/macOS/Windows
+    "pyinstaller>=6.0",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",

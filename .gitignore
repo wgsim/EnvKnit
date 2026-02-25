@@ -24,9 +24,9 @@ wheels/
 .installed.cfg
 *.egg
 
-# PyInstaller
+# PyInstaller — ignore generated artifacts but keep the committed spec file
 *.manifest
-*.spec
+# *.spec intentionally NOT ignored — envknit-cli.spec is committed source
 
 # Installer logs
 pip-log.txt

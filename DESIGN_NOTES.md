@@ -65,12 +65,12 @@ Does: reads lock, hooks imports    Does: calls conda/pip, writes lock, manages p
 - Library only *reads* the managed environment, never *manages* what it lives in
 - Library's sole dep (`packaging`) has near-zero conflict risk
 
-**CLI distribution options** (decision pending):
-1. **PyInstaller/Nuitka**: bundle existing Python code as a single binary — lowest effort
-2. **Rust rewrite**: maximum independence, highest effort, uv-style UX
+**CLI distribution options**:
+1. **PyInstaller/Nuitka**: bundle existing Python code as a single binary — lowest effort ✓ **Implemented** (`envknit-cli.spec`, `scripts/build-cli.sh`, `.github/workflows/build-cli.yml`)
+2. **Rust rewrite**: maximum independence, highest effort, uv-style UX — future option if binary size / startup time become constraints
 3. **pipx-installed**: delegate bootstrap to pipx — least work, weakest solution
 
-**Recommended next step**: Prototype with PyInstaller first (reuses existing code), define stable lock file contract, then evaluate if Rust rewrite is warranted.
+**Status**: PyInstaller prototype complete. `pyinstaller envknit-cli.spec` produces a single-file `dist/envknit` binary that bundles click, rich, pyyaml, and all EnvKnit internals. CI builds for linux/macos/windows via `.github/workflows/build-cli.yml`. Lock file contract defined (see below). Rust rewrite deferred until PyInstaller path proves insufficient.
 
 ---
 
@@ -87,9 +87,10 @@ Does: reads lock, hooks imports    Does: calls conda/pip, writes lock, manages p
 
 ### #4. Resolver Limitations
 
-- Transitive dependency resolution disabled by default
-- Simplified constraint intersection logic
-- Limited backtracking sophistication
+**Status**: Resolved.
+- Transitive dependency resolution **enabled by default** (`resolve_dependencies=True`).
+- `_check_constraint_conflict` now performs a **semantic check** against backend candidates (not just syntactic `InvalidSpecifier` detection) — catches cases like `>=2.0 AND <1.5`.
+- Candidates cache **invalidated** on every `_add_constraint` call and cleared on backtrack; excluded versions tracked separately to prevent re-selection of failed versions.
 
 ---
 
