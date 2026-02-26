@@ -19,6 +19,7 @@ from importlib.abc import Loader, MetaPathFinder
 from importlib.machinery import ModuleSpec
 from importlib.util import spec_from_file_location
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 # Per-context (per asyncio.Task / per thread) version mapping.
@@ -27,6 +28,15 @@ from typing import Any
 # context never affect another, making version routing async and thread safe.
 _active_versions: ContextVar[dict[str, str]] = ContextVar(
     "envknit_active_versions", default={}
+)
+
+# Per-context (per asyncio.Task / per thread) module cache.
+# Maps fullname -> loaded ModuleType. None means no override active.
+# When a VersionContext is entered, a fresh dict is created for this context;
+# subsequent imports within the context store into and read from this dict
+# instead of mutating the global sys.modules.
+_ctx_modules: ContextVar[dict[str, ModuleType] | None] = ContextVar(
+    "envknit_ctx_modules", default=None
 )
 
 from envknit.core.lock import LockFile
@@ -479,6 +489,52 @@ class VersionedLoader(Loader):
         return None
 
 
+class _CachedModuleLoader(Loader):
+    """
+    Trivial loader that returns a pre-loaded module from the context cache.
+
+    Used by VersionedFinder.find_spec when a module has already been loaded
+    within the current VersionContext and is present in _ctx_modules.
+    """
+
+    def __init__(self, module: ModuleType) -> None:
+        self._module = module
+
+    def create_module(self, spec: ModuleSpec):  # noqa: ARG002
+        return self._module
+
+    def exec_module(self, module) -> None:  # noqa: ARG002
+        # Module already executed; nothing to do.
+        pass
+
+
+class _CtxCachingLoader(Loader):
+    """
+    Loader wrapper that stores the loaded module in the per-context module
+    cache (_ctx_modules) after exec_module completes.
+
+    This ensures that within a VersionContext, the first import populates the
+    context cache and all subsequent imports are served from it — making the
+    per-context cache the source of truth for module identity.
+    """
+
+    def __init__(self, inner: Loader, fullname: str) -> None:
+        self._inner = inner
+        self._fullname = fullname
+
+    def create_module(self, spec: ModuleSpec):
+        if hasattr(self._inner, "create_module"):
+            return self._inner.create_module(spec)
+        return None
+
+    def exec_module(self, module) -> None:
+        if hasattr(self._inner, "exec_module"):
+            self._inner.exec_module(module)
+        ctx_cache = _ctx_modules.get()
+        if ctx_cache is not None:
+            ctx_cache[self._fullname] = module
+
+
 class VersionedFinder(MetaPathFinder):
     """
     Meta path finder for versioned packages.
@@ -568,6 +624,16 @@ class VersionedFinder(MetaPathFinder):
         Raises:
             ImportError: In strict mode when non-versioned import is used for registered package
         """
+        # Fast path: check per-context module cache first (async/thread-safe).
+        # If a VersionContext is active and already loaded this module, return
+        # a spec that yields the cached module without re-importing.
+        ctx_cache = _ctx_modules.get()
+        if ctx_cache is not None and fullname in ctx_cache:
+            cached_mod = ctx_cache[fullname]
+            spec = ModuleSpec(fullname, _CachedModuleLoader(cached_mod))
+            spec.has_location = False
+            return spec
+
         root_package = fullname.split(".")[0]
         root_normalized = root_package.lower().replace("-", "_")
 
@@ -637,11 +703,18 @@ class VersionedFinder(MetaPathFinder):
             return None
 
         is_pkg = module_path.name == "__init__.py"
-        return spec_from_file_location(
+        spec = spec_from_file_location(
             fullname,
             module_path,
             submodule_search_locations=[str(module_path.parent)] if is_pkg else None,
         )
+        # Wrap the loader so that after execution the module is stored in the
+        # per-context module cache (if a VersionContext is active).  This makes
+        # repeated imports within the same context hit the cache instead of
+        # re-executing the module file.
+        if spec is not None and spec.loader is not None:
+            spec.loader = _CtxCachingLoader(spec.loader, fullname)
+        return spec
 
     def _resolve_module_path(self, base_path: Path, fullname: str) -> Path | None:
         """Resolve the .py / .so file for fullname inside base_path."""
@@ -1086,12 +1159,20 @@ class VersionContext:
         # this set does not affect other Tasks or threads.
         current = _active_versions.get()
         self._ctx_token: Token = _active_versions.set({**current, pkg: self.version})
+
+        # ContextVar: create a fresh per-context module cache so that imports
+        # within this block are stored/fetched from this isolated dict rather
+        # than mutating the global sys.modules.
+        self._ctx_modules_token: Token = _ctx_modules.set({})
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """Exit the context, restoring the previous version."""
         # Atomically restore ContextVar to state before __enter__.
         _active_versions.reset(self._ctx_token)
+
+        # Reset per-context module cache (no longer in an override context).
+        _ctx_modules.reset(self._ctx_modules_token)
 
         pkg = self.name.lower().replace("-", "_")
         # Remove modules loaded by this context under the public package name.
@@ -1214,6 +1295,7 @@ __all__ = [
     "VersionedFinder",
     "VersionedLoader",
     "_active_versions",
+    "_ctx_modules",
     "_has_c_extensions",
     "configure_from_lock",
     "disable",
