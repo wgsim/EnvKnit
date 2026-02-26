@@ -284,7 +284,7 @@ def __import__(name, ...):
 
 ### #7. Subprocess Worker Pool — Design Spec
 
-**Status**: Not yet implemented. Required for C extension multi-version support.
+**Status**: Implemented (Option B). See `src/envknit/isolation/worker.py` and `tests/test_worker.py` (25 tests). Remaining: hybrid auto-detection so `use()` routes automatically (see #5 Phase 2).
 
 #### Isolation Unit: Environment Hash (Not Package+Version)
 

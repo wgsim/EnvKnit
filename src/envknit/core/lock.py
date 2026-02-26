@@ -131,14 +131,16 @@ class LockedPackage:
     Attributes:
         name: Package name
         version: Exact version string
+        install_path: Absolute path to the installed package (SHARED with library)
         source: Package source (e.g., "conda-forge", "pypi")
-        sha256: Optional checksum for verification
-        selection_reason: Explanation of why this version was selected
-        dependencies: List of package dependencies with constraints
+        sha256: Optional checksum for integrity verification (SHARED with library)
+        selection_reason: Explanation of why this version was selected (CLI-only)
+        dependencies: List of package dependencies with constraints (CLI-only)
     """
 
     name: str
     version: str
+    install_path: str | None = None  # SHARED — required by the library
     source: str = "conda-forge"
     sha256: str | None = None
     selection_reason: SelectionReason | None = None
@@ -149,8 +151,13 @@ class LockedPackage:
         result: dict[str, Any] = {
             "name": self.name,
             "version": self.version,
-            "source": self.source,
         }
+
+        # install_path is SHARED — always written when present
+        if self.install_path:
+            result["install_path"] = self.install_path
+
+        result["source"] = self.source
 
         if self.sha256:
             result["sha256"] = self.sha256
@@ -160,7 +167,7 @@ class LockedPackage:
 
         if self.dependencies:
             result["dependencies"] = [
-                d.to_dict() if hasattr(d, 'to_dict') else {"name": str(d), "constraint": ""}
+                d.to_dict() if hasattr(d, "to_dict") else {"name": str(d), "constraint": ""}
                 for d in self.dependencies
             ]
 
@@ -180,6 +187,7 @@ class LockedPackage:
         return cls(
             name=data.get("name", ""),
             version=data.get("version", ""),
+            install_path=data.get("install_path"),
             source=data.get("source", "conda-forge"),
             sha256=data.get("sha256"),
             selection_reason=selection_reason,
@@ -748,6 +756,7 @@ class LockFile:
         return LockedPackage(
             name=data.get("name", ""),
             version=data.get("version", ""),
+            install_path=data.get("install_path"),
             source=data.get("source", "conda-forge"),
             sha256=data.get("sha256") or data.get("checksum"),
             selection_reason=selection_reason,

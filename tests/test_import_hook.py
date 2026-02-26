@@ -13,19 +13,22 @@ from unittest.mock import patch, MagicMock
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from envknit.isolation.import_hook import (
+    CExtensionError,
+    ImportHookManager,
+    IsolationContext,
+    IsolationImporter,
+    VersionContext,
     VersionRegistry,
     VersionedFinder,
     VersionedLoader,
-    ImportHookManager,
-    VersionContext,
-    IsolationImporter,
-    IsolationContext,
     _active_versions,
-    enable,
+    _c_ext_detection_cache,
+    _has_c_extensions,
     disable,
-    use,
-    import_version,
+    enable,
     get_manager,
+    import_version,
+    use,
 )
 
 
@@ -503,3 +506,118 @@ class TestContextVarIsolation:
             pass
 
         assert "numpy" not in _active_versions.get()
+
+
+# ── Hybrid auto-detection ─────────────────────────────────────────────────────
+
+class TestHybridDetection:
+    """Tests for C extension detection and use() guard."""
+
+    @pytest.fixture(autouse=True)
+    def clear_cache(self):
+        """Ensure detection cache is clean between tests."""
+        _c_ext_detection_cache.clear()
+        yield
+        _c_ext_detection_cache.clear()
+
+    @pytest.fixture(autouse=True)
+    def reset_manager(self):
+        """Give each test a fresh ImportHookManager."""
+        ImportHookManager._instance = None
+        yield
+        manager = ImportHookManager.get_instance()
+        manager.uninstall()
+        ImportHookManager._instance = None
+
+    # ── _has_c_extensions ────────────────────────────────────────────────────
+
+    def test_pure_python_path_returns_false(self):
+        """A directory with only .py files reports no C extensions."""
+        assert _has_c_extensions(_V1) is False
+
+    def test_nonexistent_path_returns_false(self):
+        assert _has_c_extensions(Path("/nonexistent/path")) is False
+
+    def test_directory_with_so_returns_true(self, tmp_path):
+        """A .so file anywhere under the path triggers detection."""
+        (tmp_path / "myext.cpython-312-x86_64-linux-gnu.so").touch()
+        assert _has_c_extensions(tmp_path) is True
+
+    def test_directory_with_pyd_returns_true(self, tmp_path):
+        """A .pyd file (Windows extension) triggers detection."""
+        (tmp_path / "myext.pyd").touch()
+        assert _has_c_extensions(tmp_path) is True
+
+    def test_detection_cached_on_repeat_call(self, tmp_path):
+        """Second call returns from cache without filesystem scan."""
+        (tmp_path / "ext.so").touch()
+        result1 = _has_c_extensions(tmp_path)
+        # Remove the file — if cache works, second call still returns True
+        (tmp_path / "ext.so").unlink()
+        result2 = _has_c_extensions(tmp_path)
+        assert result1 is True
+        assert result2 is True  # served from cache
+
+    def test_nested_so_detected(self, tmp_path):
+        """C extension nested in a subdirectory is still detected."""
+        subdir = tmp_path / "pkg" / "submod"
+        subdir.mkdir(parents=True)
+        (subdir / "fast.so").touch()
+        assert _has_c_extensions(tmp_path) is True
+
+    # ── ImportHookManager.use() guard ────────────────────────────────────────
+
+    @pytest.mark.skipif(not _V1.exists(), reason="poc/fake_packages not found")
+    def test_use_ok_for_pure_python(self):
+        """use() succeeds for a pure-Python package (no .so files)."""
+        manager = ImportHookManager.get_instance()
+        manager.install()
+        manager.register_package("mylib", "1.0.0", path=_V1)
+        ctx = manager.use("mylib", "1.0.0")
+        assert isinstance(ctx, VersionContext)
+
+    def test_use_raises_for_c_extension_package(self, tmp_path):
+        """use() raises CExtensionError when install path contains a .so file."""
+        (tmp_path / "ext.cpython-312.so").touch()
+
+        manager = ImportHookManager.get_instance()
+        manager.install()
+        manager.register_package("nativelib", "1.0.0", path=tmp_path)
+
+        with pytest.raises(CExtensionError, match="worker"):
+            manager.use("nativelib", "1.0.0")
+
+    def test_use_error_message_contains_worker_call(self, tmp_path):
+        """CExtensionError message shows the worker() call syntax."""
+        (tmp_path / "ext.so").touch()
+
+        manager = ImportHookManager.get_instance()
+        manager.register_package("mylib", "2.0.0", path=tmp_path)
+
+        with pytest.raises(CExtensionError) as exc_info:
+            manager.use("mylib", "2.0.0")
+
+        msg = str(exc_info.value)
+        assert "envknit.worker" in msg
+        assert "mylib" in msg
+        assert "2.0.0" in msg
+
+    def test_use_no_path_registered_skips_detection(self):
+        """use() without a registered path skips detection and returns VersionContext."""
+        manager = ImportHookManager.get_instance()
+        # Register without path — VersionRegistry may raise or return None
+        # depending on whether store resolves it.  Either way, no CExtensionError.
+        try:
+            ctx = manager.use("unknown_pkg", "0.0.0")
+            assert isinstance(ctx, VersionContext)
+        except (ValueError, FileNotFoundError):
+            pass  # expected if store lookup fails; NOT CExtensionError
+
+    def test_c_extension_error_is_import_error_subclass(self, tmp_path):
+        """CExtensionError is a subclass of ImportError for except ImportError: compat."""
+        (tmp_path / "ext.so").touch()
+        manager = ImportHookManager.get_instance()
+        manager.register_package("clib", "1.0.0", path=tmp_path)
+
+        with pytest.raises(ImportError):
+            manager.use("clib", "1.0.0")

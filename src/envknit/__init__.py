@@ -27,8 +27,11 @@ Example usage:
 
 # Import convenience functions for public API
 from envknit.isolation.import_hook import (
+    CExtensionError,
     ImportHookManager,
+    SchemaVersionError,
     VersionContext,
+    _has_c_extensions,
     configure_from_lock,
     disable,
     enable,
@@ -58,6 +61,10 @@ __all__ = [
     "get_manager",
     # Subprocess worker pool API (C extensions / Category B packages)
     "worker",
+    # Hybrid auto-detection + errors
+    "CExtensionError",
+    "SchemaVersionError",
+    "_has_c_extensions",
     # Classes
     "ImportHookManager",
     "VersionContext",

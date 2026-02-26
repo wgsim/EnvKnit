@@ -9,6 +9,7 @@ Supports versioned imports like "numpy@1.26.4" for multi-version coexistence.
 from __future__ import annotations
 
 import contextlib
+import importlib.machinery
 import logging
 import sys
 from collections.abc import Sequence
@@ -32,6 +33,60 @@ from envknit.core.lock import LockFile
 from envknit.storage.store import EnvironmentStore
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# C extension detection
+# ---------------------------------------------------------------------------
+
+# Platform-correct extension suffixes — e.g. ['.cpython-312-x86_64-linux-gnu.so',
+# '.abi3.so', '.so'] on Linux.  '.so' and '.pyd' are added as baseline fallbacks.
+_C_EXT_SUFFIXES: frozenset[str] = frozenset(
+    importlib.machinery.EXTENSION_SUFFIXES + [".so", ".pyd"]
+)
+
+# Path → has_c_extensions cache.  Install paths are immutable once written by
+# the CLI, so this never goes stale in normal operation.
+_c_ext_detection_cache: dict[Path, bool] = {}
+
+
+def _has_c_extensions(path: Path) -> bool:
+    """
+    Return True if any C extension file exists anywhere under *path*.
+
+    Uses EXTENSION_SUFFIXES for platform-correct detection (.cpython-*.so on
+    Linux/macOS, .pyd on Windows).  Result is cached per path.
+    """
+    if path in _c_ext_detection_cache:
+        return _c_ext_detection_cache[path]
+
+    if not path.is_dir():
+        _c_ext_detection_cache[path] = False
+        return False
+
+    found = any(
+        f.is_file() and any(f.name.endswith(s) for s in _C_EXT_SUFFIXES)
+        for f in path.rglob("*")
+    )
+    _c_ext_detection_cache[path] = found
+    return found
+
+
+class CExtensionError(ImportError):
+    """
+    Raised when use() is called for a package that contains C extensions.
+
+    In-process multi-version loading of C extensions is not supported
+    (see DESIGN_NOTES.md #5).  Use envknit.worker() instead.
+    """
+
+
+class SchemaVersionError(ValueError):
+    """
+    Raised when a lock file's schema_version is incompatible with this library.
+
+    The library supports schema_version "1.x".  A "2.0" (or later major) lock
+    file requires a newer version of the envknit library.
+    """
 
 
 @dataclass
@@ -208,24 +263,78 @@ class VersionRegistry:
                 return parts[0], parts[1]
         return None
 
-    def load_from_lock(self, lock_path: Path) -> None:
+    def load_from_lock(self, lock_path: Path, env: str | None = None) -> int:
         """
         Load package versions from a lock file.
 
+        Checks schema_version compatibility before loading.  Packages with an
+        explicit ``install_path`` in the lock file are registered directly;
+        those without fall back to the EnvironmentStore lookup.
+
         Args:
-            lock_path: Path to the lock file
+            lock_path: Path to the lock file.
+            env: Optional environment name to load (loads all envs if None).
+
+        Returns:
+            Number of packages successfully registered.
+
+        Raises:
+            SchemaVersionError: If the lock file's major schema version is
+                newer than what this library supports.
         """
+        from envknit.core.lock import LOCK_SCHEMA_VERSION
+
         lock = LockFile(lock_path)
         lock.load()
 
-        for _, packages in lock.environments.items():
+        # --- Schema version gate ---
+        file_major = int(lock.schema_version.split(".")[0])
+        supported_major = int(LOCK_SCHEMA_VERSION.split(".")[0])
+        if file_major > supported_major:
+            raise SchemaVersionError(
+                f"Lock file uses schema_version '{lock.schema_version}', but "
+                f"this envknit library only supports '{LOCK_SCHEMA_VERSION}'. "
+                f"Please upgrade envknit."
+            )
+        if file_major < supported_major:
+            logger.warning(
+                f"Lock file uses older schema_version '{lock.schema_version}' "
+                f"(library supports '{LOCK_SCHEMA_VERSION}'). "
+                f"Consider regenerating the lock file with the current CLI."
+            )
+
+        # --- Register packages ---
+        registered = 0
+        envs = lock.environments
+
+        # Filter to requested env if specified
+        if env is not None:
+            envs = {k: v for k, v in envs.items() if k == env}
+            if not envs and env in ("default",) and lock.packages:
+                # Fallback: no explicit env key, use flat packages list
+                envs = {"default": list(lock.packages)}
+
+        seen: set[tuple[str, str]] = set()
+        for packages in envs.values():
             for pkg in packages:
+                key = (pkg.name, pkg.version)
+                if key in seen:
+                    continue
+                seen.add(key)
+
+                pkg_path: Path | None = Path(pkg.install_path) if pkg.install_path else None
                 try:
-                    self.register_package(pkg.name, pkg.version)
-                except ValueError as e:
+                    self.register_package(pkg.name, pkg.version, path=pkg_path)
+                    registered += 1
+                    logger.debug(
+                        f"Registered {pkg.name}=={pkg.version} "
+                        f"from lock (path={'explicit' if pkg_path else 'store lookup'})"
+                    )
+                except (ValueError, FileNotFoundError) as e:
                     logger.warning(f"Could not register {pkg.name}=={pkg.version}: {e}")
 
-        logger.info(f"Loaded {len(lock.packages)} packages from lock file")
+        logger.info(f"Loaded {registered}/{len(seen)} packages from {lock_path}")
+        return registered
 
     def clear(self) -> None:
         """Clear all registered packages."""
@@ -790,19 +899,42 @@ class ImportHookManager:
         """Check if the import hook is installed."""
         return self._installed
 
-    def configure_from_lock(self, lock_path: str) -> None:
+    def configure_from_lock(
+        self,
+        lock_path: str,
+        env: str | None = None,
+        auto_install: bool = True,
+    ) -> int:
         """
-        Configure packages from a lock file.
+        Configure the import hook from a lock file produced by the CLI.
+
+        Reads ``install_path`` from each package entry and registers them with
+        the VersionRegistry so that ``use()`` / ``import_version()`` can route
+        imports to the correct versioned installation.
 
         Args:
-            lock_path: Path to the lock file
+            lock_path: Path to the lock file (``envknit.lock.yaml``).
+            env: Environment name to load (loads all environments if None).
+            auto_install: If True (default), install the import hook when it
+                is not already installed.
+
+        Returns:
+            Number of packages successfully registered.
+
+        Raises:
+            FileNotFoundError: Lock file does not exist.
+            SchemaVersionError: Lock file schema_version is incompatible.
         """
         path = Path(lock_path)
         if not path.exists():
             raise FileNotFoundError(f"Lock file not found: {lock_path}")
 
-        self.registry.load_from_lock(path)
-        logger.info(f"Configured from lock file: {lock_path}")
+        if auto_install and not self._installed:
+            self.install()
+
+        count = self.registry.load_from_lock(path, env=env)
+        logger.info(f"Configured {count} package(s) from lock file: {lock_path}")
+        return count
 
     def register_package(
         self,
@@ -834,6 +966,9 @@ class ImportHookManager:
         """
         Create a version context for using a specific package version.
 
+        Raises CExtensionError if the registered install path contains C
+        extensions (.so/.pyd).  In that case, use envknit.worker() instead.
+
         Args:
             name: Package name
             version: Version to use
@@ -841,6 +976,17 @@ class ImportHookManager:
         Returns:
             VersionContext for use with context manager
         """
+        norm = name.lower().replace("-", "_")
+        path = self.registry.get_package_path(name, version)
+        if path is not None and _has_c_extensions(path):
+            raise CExtensionError(
+                f"'{name}' contains C extensions — in-process multi-version "
+                f"loading is not supported (see DESIGN_NOTES.md #5).\n\n"
+                f"Use the subprocess worker pool instead:\n\n"
+                f"    with envknit.worker('{norm}', '{version}', "
+                f"install_path='{path}') as {norm}:\n"
+                f"        result = {norm}.some_function()\n"
+            )
         return VersionContext(self.finder, name, version)
 
     def import_version(
@@ -1037,12 +1183,43 @@ def set_default(name: str, version: str) -> None:
     manager.set_default_version(name, version)
 
 
-def configure_from_lock(lock_path: str) -> None:
+def configure_from_lock(
+    lock_path: str,
+    env: str | None = None,
+    auto_install: bool = True,
+) -> int:
     """
-    Configure packages from a lock file.
+    Configure the import hook from a lock file produced by the CLI.
 
     Args:
-        lock_path: Path to the lock file
+        lock_path: Path to ``envknit.lock.yaml``.
+        env: Environment name to load (loads all if None).
+        auto_install: Install the import hook if not already installed.
+
+    Returns:
+        Number of packages registered.
     """
     manager = get_manager()
-    manager.configure_from_lock(lock_path)
+    return manager.configure_from_lock(lock_path, env=env, auto_install=auto_install)
+
+
+__all__ = [
+    "CExtensionError",
+    "SchemaVersionError",
+    "ImportHookManager",
+    "IsolationContext",
+    "IsolationImporter",
+    "VersionContext",
+    "VersionRegistry",
+    "VersionedFinder",
+    "VersionedLoader",
+    "_active_versions",
+    "_has_c_extensions",
+    "configure_from_lock",
+    "disable",
+    "enable",
+    "get_manager",
+    "import_version",
+    "set_default",
+    "use",
+]
