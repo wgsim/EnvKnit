@@ -1035,23 +1035,32 @@ class ImportHookManager:
         """
         self.registry.set_default_version(name, version)
 
-    def use(self, name: str, version: str) -> VersionContext:
+    def use(self, name: str, version: str, *, auto_worker: bool = False) -> VersionContext:
         """
         Create a version context for using a specific package version.
 
         Raises CExtensionError if the registered install path contains C
-        extensions (.so/.pyd).  In that case, use envknit.worker() instead.
+        extensions (.so/.pyd).  In that case, use envknit.worker() instead,
+        or pass ``auto_worker=True`` to have this method do it automatically.
 
         Args:
             name: Package name
             version: Version to use
+            auto_worker: When True and C extensions are detected, transparently
+                return a worker() context manager instead of raising
+                CExtensionError.  When False (default), the existing behavior
+                is preserved and CExtensionError is raised.
 
         Returns:
-            VersionContext for use with context manager
+            VersionContext for use with context manager, or a WorkerContext
+            when auto_worker=True and C extensions are present.
         """
         norm = name.lower().replace("-", "_")
         path = self.registry.get_package_path(name, version)
         if path is not None and _has_c_extensions(path):
+            if auto_worker:
+                from envknit.isolation.worker import worker
+                return worker(name, version, install_path=path)
             raise CExtensionError(
                 f"'{name}' contains C extensions — in-process multi-version "
                 f"loading is not supported (see DESIGN_NOTES.md #5).\n\n"
@@ -1207,16 +1216,21 @@ def disable() -> None:
     manager.uninstall()
 
 
-def use(name: str, version: str) -> VersionContext:
+def use(name: str, version: str, *, auto_worker: bool = False) -> VersionContext:
     """
     Create a context for using a specific package version.
 
     Args:
         name: Package name
         version: Version to use
+        auto_worker: When True and C extensions are detected, transparently
+            return a worker() context manager instead of raising
+            CExtensionError.  When False (default), existing behavior is
+            preserved.
 
     Returns:
-        VersionContext for use with context manager
+        VersionContext for use with context manager, or a WorkerContext
+        when auto_worker=True and C extensions are present.
 
     Example:
         >>> import envknit
@@ -1228,7 +1242,7 @@ def use(name: str, version: str) -> VersionContext:
     manager = get_manager()
     if not manager.is_installed():
         manager.install()
-    return manager.use(name, version)
+    return manager.use(name, version, auto_worker=auto_worker)
 
 
 def import_version(name: str, version: str, alias: str | None = None) -> Any:

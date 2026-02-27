@@ -1559,3 +1559,41 @@ class TestIsolationContextDataclass:
         assert ctx.environment == "prod"
         assert "numpy" in ctx.packages
         assert "/some/path" in ctx.paths
+
+
+class TestUseAutoWorker:
+    """Tests for the auto_worker parameter on use() and ImportHookManager.use()."""
+
+    def test_auto_worker_false_raises_cext_error(self, tmp_path):
+        """Default auto_worker=False: C extension package raises CExtensionError."""
+        (tmp_path / "foo.so").touch()
+        manager = ImportHookManager.get_instance()
+        manager.install()
+        manager.register_package("mylib", "1.0.0", path=tmp_path)
+
+        with pytest.raises(CExtensionError):
+            manager.use("mylib", "1.0.0")
+
+    def test_auto_worker_true_returns_worker_context(self, tmp_path):
+        """auto_worker=True with C extensions: returns worker() context manager."""
+        (tmp_path / "foo.so").touch()
+        manager = ImportHookManager.get_instance()
+        manager.install()
+        manager.register_package("mylib", "1.0.0", path=tmp_path)
+
+        fake_ctx = MagicMock()
+        with patch("envknit.isolation.worker.worker", return_value=fake_ctx) as mock_worker:
+            result = manager.use("mylib", "1.0.0", auto_worker=True)
+
+        mock_worker.assert_called_once_with("mylib", "1.0.0", install_path=tmp_path)
+        assert result is fake_ctx
+
+    def test_auto_worker_no_cext_returns_version_context(self, tmp_path):
+        """auto_worker=True without C extensions: returns VersionContext as normal."""
+        # tmp_path has no .so/.pyd files
+        manager = ImportHookManager.get_instance()
+        manager.install()
+        manager.register_package("purepy", "2.0.0", path=tmp_path)
+
+        result = manager.use("purepy", "2.0.0", auto_worker=True)
+        assert isinstance(result, VersionContext)

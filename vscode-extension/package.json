@@ -1,0 +1,57 @@
+{
+  "name": "envknit",
+  "displayName": "EnvKnit",
+  "description": "Multi-version Python package manager support for VS Code",
+  "version": "0.1.0",
+  "publisher": "envknit",
+  "engines": { "vscode": "^1.80.0" },
+  "categories": ["Other", "Linters"],
+  "activationEvents": ["workspaceContains:envknit.yaml"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "yamlValidation": [
+      {
+        "fileMatch": "envknit.yaml",
+        "url": "./schemas/envknit-config.schema.json"
+      },
+      {
+        "fileMatch": "envknit.lock.yaml",
+        "url": "./schemas/envknit-lock.schema.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "envknit.install",
+        "title": "EnvKnit: Install Dependencies"
+      },
+      {
+        "command": "envknit.add",
+        "title": "EnvKnit: Add Package"
+      },
+      {
+        "command": "envknit.status",
+        "title": "EnvKnit: Show Status"
+      }
+    ],
+    "configuration": {
+      "title": "EnvKnit",
+      "properties": {
+        "envknit.cliPath": {
+          "type": "string",
+          "default": "envknit",
+          "description": "Path to the envknit CLI binary"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.80.0",
+    "typescript": "^5.0.0"
+  }
+}

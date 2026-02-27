@@ -70,7 +70,19 @@ Does: reads lock, hooks imports    Does: calls conda/pip, writes lock, manages p
 2. **Rust rewrite**: maximum independence, highest effort, uv-style UX — future option if binary size / startup time become constraints
 3. **pipx-installed**: delegate bootstrap to pipx — least work, weakest solution
 
-**Status**: PyInstaller prototype complete. `pyinstaller envknit-cli.spec` produces a single-file `dist/envknit` binary that bundles click, rich, pyyaml, and all EnvKnit internals. CI builds for linux/macos/windows via `.github/workflows/build-cli.yml`. Lock file contract defined (see below). Rust rewrite deferred until PyInstaller path proves insufficient.
+**Status**: PyInstaller prototype complete. `pyinstaller envknit-cli.spec` produces a single-file `dist/envknit` binary that bundles click, rich, pyyaml, and all EnvKnit internals. CI builds for linux/macos/windows via `.github/workflows/build-cli.yml`. Lock file contract defined (see below).
+
+**Rust rewrite evaluation (2026-02-27)**:
+
+| Metric | PyInstaller (current) | Rust (projected) | Δ |
+|--------|----------------------|------------------|---|
+| Linux binary size | 27 MB | ~5 MB | −80% |
+| macOS binary size | 12 MB | ~4 MB | −65% |
+| Cold start (`--help`) | **684 ms** | ~15 ms | −98% |
+| Implementation effort | ✅ complete | 6–12 weeks | — |
+| Python interop | native | pyo3 / subprocess | complex |
+
+**Verdict — Rust rewrite recommended for v1.0**. Cold start of 684 ms is a significant UX liability for a CLI tool used interactively. The PyInstaller path is sufficient for early adopters, but a Rust core (using `pyo3` for Python interop or subprocess-only lock-file writing) should be planned for v1.0. Key CLI commands (`init`, `add`, `resolve`, `lock`, `install`) can be ported incrementally. The `envknit` Python library stays in Python.
 
 ---
 

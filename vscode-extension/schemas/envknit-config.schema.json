@@ -1,0 +1,56 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EnvKnit Configuration",
+  "description": "Schema for envknit.yaml project configuration file",
+  "type": "object",
+  "properties": {
+    "envknit_version": {
+      "type": "string",
+      "description": "EnvKnit version constraint"
+    },
+    "environments": {
+      "type": "object",
+      "description": "Named environments with their package requirements",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "packages": {
+            "type": "array",
+            "description": "List of packages for this environment",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Package name"
+                },
+                "version": {
+                  "type": "string",
+                  "description": "Version constraint (e.g. '>=1.0,<2.0')"
+                },
+                "extras": {
+                  "type": "array",
+                  "description": "Optional extras to install",
+                  "items": { "type": "string" }
+                }
+              },
+              "required": ["name"],
+              "additionalProperties": false
+            }
+          },
+          "backend": {
+            "type": "string",
+            "enum": ["conda", "pip", "poetry"],
+            "description": "Package backend to use for this environment"
+          },
+          "python_version": {
+            "type": "string",
+            "description": "Python version constraint (e.g. '>=3.10')"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
