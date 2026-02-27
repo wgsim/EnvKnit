@@ -605,3 +605,391 @@ class TestInstall:
 
             result = runner.invoke(app, ["install"])
         assert result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# TestResolveWithPackages
+# ---------------------------------------------------------------------------
+
+
+class TestResolveWithPackages:
+    """Test resolve command with packages defined in config."""
+
+    def test_resolve_single_package_dry_run(self, initialized_project, runner):
+        """resolve --dry-run with one package succeeds, no lock written."""
+        runner.invoke(app, ["add", "numpy>=1.24"])
+
+        mock_resolution = MagicMock()
+        mock_resolution.success = True
+        mock_resolution.packages = {"numpy": "1.26.4"}
+        mock_resolution.graph = None
+        mock_resolution.conflicts = []
+        mock_resolution.decision_log = []
+
+        with patch("envknit.cli.main.get_backend") as mgb, \
+             patch("envknit.cli.main.PubGrubResolver") as mrc:
+            mock_backend = MagicMock()
+            mock_backend.is_available.return_value = True
+            mock_backend.name = "pip"
+            mgb.return_value = mock_backend
+            mock_resolver = MagicMock()
+            mock_resolver.resolve.return_value = mock_resolution
+            mrc.return_value = mock_resolver
+            result = runner.invoke(app, ["resolve", "--dry-run"])
+
+        assert result.exit_code == 0
+        assert not (initialized_project / "envknit-lock.yaml").exists()
+
+    def test_resolve_two_packages_saves_lock(self, initialized_project, runner):
+        """resolve without --dry-run writes a lock file on success."""
+        runner.invoke(app, ["add", "numpy>=1.24", "pandas>=2.0"])
+
+        mock_resolution = MagicMock()
+        mock_resolution.success = True
+        mock_resolution.packages = {"numpy": "1.26.4", "pandas": "2.1.0"}
+        mock_resolution.graph = None
+        mock_resolution.conflicts = []
+        mock_resolution.decision_log = []
+
+        with patch("envknit.cli.main.get_backend") as mgb, \
+             patch("envknit.cli.main.PubGrubResolver") as mrc:
+            mock_backend = MagicMock()
+            mock_backend.is_available.return_value = True
+            mock_backend.name = "pip"
+            mgb.return_value = mock_backend
+            mock_resolver = MagicMock()
+            mock_resolver.resolve.return_value = mock_resolution
+            mrc.return_value = mock_resolver
+            result = runner.invoke(app, ["resolve"])
+
+        assert result.exit_code == 0
+        assert (initialized_project / "envknit-lock.yaml").exists()
+
+    def test_resolve_conflict_exits_nonzero(self, initialized_project, runner):
+        """resolve exits non-zero when resolution has conflicts."""
+        runner.invoke(app, ["add", "numpy>=1.24"])
+
+        mock_conflict = MagicMock()
+        mock_conflict.package = "numpy"
+        mock_conflict.message = "Incompatible constraints"
+        mock_conflict.suggestion = None
+        mock_conflict.constraints = []
+
+        mock_resolution = MagicMock()
+        mock_resolution.success = False
+        mock_resolution.packages = {}
+        mock_resolution.graph = None
+        mock_resolution.conflicts = [mock_conflict]
+        mock_resolution.decision_log = []
+
+        with patch("envknit.cli.main.get_backend") as mgb, \
+             patch("envknit.cli.main.PubGrubResolver") as mrc:
+            mock_backend = MagicMock()
+            mock_backend.is_available.return_value = True
+            mock_backend.name = "pip"
+            mgb.return_value = mock_backend
+            mock_resolver = MagicMock()
+            mock_resolver.resolve.return_value = mock_resolution
+            mrc.return_value = mock_resolver
+            result = runner.invoke(app, ["resolve"])
+
+        assert result.exit_code != 0
+
+    def test_resolve_specific_env_with_packages(self, initialized_project, runner):
+        """resolve --env default resolves the named environment."""
+        runner.invoke(app, ["add", "scipy"])
+
+        mock_resolution = MagicMock()
+        mock_resolution.success = True
+        mock_resolution.packages = {"scipy": "1.11.0"}
+        mock_resolution.graph = None
+        mock_resolution.conflicts = []
+        mock_resolution.decision_log = []
+
+        with patch("envknit.cli.main.get_backend") as mgb, \
+             patch("envknit.cli.main.PubGrubResolver") as mrc:
+            mock_backend = MagicMock()
+            mock_backend.is_available.return_value = True
+            mock_backend.name = "pip"
+            mgb.return_value = mock_backend
+            mock_resolver = MagicMock()
+            mock_resolver.resolve.return_value = mock_resolution
+            mrc.return_value = mock_resolver
+            result = runner.invoke(app, ["resolve", "--env", "default", "--dry-run"])
+
+        assert result.exit_code == 0
+
+
+
+# ---------------------------------------------------------------------------
+# TestLockWithMockedBackend
+# ---------------------------------------------------------------------------
+
+
+class TestLockWithMockedBackend:
+    """Test lock command generating a lock file via mocked backend."""
+
+    def test_lock_creates_lock_file(self, initialized_project, runner):
+        """lock writes envknit-lock.yaml when resolution succeeds."""
+        runner.invoke(app, ["add", "numpy"])
+
+        mock_resolution = MagicMock()
+        mock_resolution.success = True
+        mock_resolution.packages = {"numpy": "1.26.4"}
+        mock_resolution.graph = None
+        mock_resolution.conflicts = []
+
+        with patch("envknit.cli.main.get_backend") as mgb, \
+             patch("envknit.cli.main.PubGrubResolver") as mrc:
+            mock_backend = MagicMock()
+            mock_backend.is_available.return_value = True
+            mock_backend.name = "pip"
+            mgb.return_value = mock_backend
+            mock_resolver = MagicMock()
+            mock_resolver.resolve.return_value = mock_resolution
+            mrc.return_value = mock_resolver
+            result = runner.invoke(app, ["lock"])
+
+        assert result.exit_code == 0
+        assert (initialized_project / "envknit-lock.yaml").exists()
+
+    def test_lock_specific_env(self, initialized_project, runner):
+        """lock --env default locks only the named environment."""
+        runner.invoke(app, ["add", "pandas"])
+
+        mock_resolution = MagicMock()
+        mock_resolution.success = True
+        mock_resolution.packages = {"pandas": "2.1.0"}
+        mock_resolution.graph = None
+        mock_resolution.conflicts = []
+
+        with patch("envknit.cli.main.get_backend") as mgb, \
+             patch("envknit.cli.main.PubGrubResolver") as mrc:
+            mock_backend = MagicMock()
+            mock_backend.is_available.return_value = True
+            mock_backend.name = "pip"
+            mgb.return_value = mock_backend
+            mock_resolver = MagicMock()
+            mock_resolver.resolve.return_value = mock_resolution
+            mrc.return_value = mock_resolver
+            result = runner.invoke(app, ["lock", "--env", "default"])
+
+        assert result.exit_code == 0
+
+    def test_lock_resolution_failure_exits_nonzero(self, initialized_project, runner):
+        """lock exits non-zero when resolver reports failure."""
+        runner.invoke(app, ["add", "numpy"])
+
+        mock_conflict = MagicMock()
+        mock_conflict.message = "Conflict: incompatible versions"
+
+        mock_resolution = MagicMock()
+        mock_resolution.success = False
+        mock_resolution.packages = {}
+        mock_resolution.graph = None
+        mock_resolution.conflicts = [mock_conflict]
+
+        with patch("envknit.cli.main.get_backend") as mgb, \
+             patch("envknit.cli.main.PubGrubResolver") as mrc:
+            mock_backend = MagicMock()
+            mock_backend.is_available.return_value = True
+            mock_backend.name = "pip"
+            mgb.return_value = mock_backend
+            mock_resolver = MagicMock()
+            mock_resolver.resolve.return_value = mock_resolution
+            mrc.return_value = mock_resolver
+            result = runner.invoke(app, ["lock"])
+
+        assert result.exit_code != 0
+
+    def test_lock_unavailable_backend_exits_nonzero(self, initialized_project, runner):
+        """lock exits non-zero when backend is not available."""
+        with patch("envknit.cli.main.get_backend") as mgb:
+            mock_backend = MagicMock()
+            mock_backend.is_available.return_value = False
+            mock_backend.name = "conda"
+            mgb.return_value = mock_backend
+            result = runner.invoke(app, ["lock"])
+
+        assert result.exit_code != 0
+
+    def test_lock_verbose_flag_accepted(self, initialized_project, runner):
+        """lock --verbose is accepted and exits 0 on success."""
+        runner.invoke(app, ["add", "requests"])
+
+        mock_resolution = MagicMock()
+        mock_resolution.success = True
+        mock_resolution.packages = {"requests": "2.31.0"}
+        mock_resolution.graph = None
+        mock_resolution.conflicts = []
+
+        with patch("envknit.cli.main.get_backend") as mgb, \
+             patch("envknit.cli.main.PubGrubResolver") as mrc:
+            mock_backend = MagicMock()
+            mock_backend.is_available.return_value = True
+            mock_backend.name = "pip"
+            mgb.return_value = mock_backend
+            mock_resolver = MagicMock()
+            mock_resolver.resolve.return_value = mock_resolution
+            mrc.return_value = mock_resolver
+            result = runner.invoke(app, ["lock", "--verbose"])
+
+        assert result.exit_code == 0
+
+
+
+# ---------------------------------------------------------------------------
+# TestRemove
+# ---------------------------------------------------------------------------
+
+
+class TestRemove:
+    """Test remove command for package removal from config."""
+
+    def test_remove_requires_init(self, tmp_path, monkeypatch, runner):
+        """remove exits non-zero when no envknit.yaml present."""
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(app, ["remove", "numpy"])
+        assert result.exit_code != 0
+
+    def test_remove_existing_package(self, initialized_project, runner):
+        """remove a package that exists removes it from config."""
+        runner.invoke(app, ["add", "numpy>=1.24"])
+        result = runner.invoke(app, ["remove", "numpy"])
+        assert result.exit_code == 0
+        import yaml
+        data = yaml.safe_load((initialized_project / "envknit.yaml").read_text())
+        packages = data["environments"]["default"].get("packages", [])
+        assert not any("numpy" in p for p in packages)
+
+    def test_remove_nonexistent_package_prints_not_found(self, initialized_project, runner):
+        """remove a package not in config prints Not found and exits 0."""
+        result = runner.invoke(app, ["remove", "nonexistent-pkg-xyz"])
+        assert result.exit_code == 0
+        assert "not found" in result.output.lower() or "Not found" in result.output
+
+    def test_remove_from_nonexistent_env_fails(self, initialized_project, runner):
+        """remove --env nonexistent exits non-zero."""
+        result = runner.invoke(app, ["remove", "numpy", "--env", "nosuchenv"])
+        assert result.exit_code != 0
+
+    def test_remove_multiple_packages(self, initialized_project, runner):
+        """remove multiple packages at once removes all matching ones."""
+        runner.invoke(app, ["add", "numpy", "pandas"])
+        result = runner.invoke(app, ["remove", "numpy", "pandas"])
+        assert result.exit_code == 0
+        import yaml
+        data = yaml.safe_load((initialized_project / "envknit.yaml").read_text())
+        packages = data["environments"]["default"].get("packages", [])
+        assert not any("numpy" in p for p in packages)
+        assert not any("pandas" in p for p in packages)
+
+    def test_remove_leaves_other_packages_intact(self, initialized_project, runner):
+        """remove only deletes the specified package."""
+        runner.invoke(app, ["add", "numpy", "scipy"])
+        runner.invoke(app, ["remove", "numpy"])
+        import yaml
+        data = yaml.safe_load((initialized_project / "envknit.yaml").read_text())
+        packages = data["environments"]["default"].get("packages", [])
+        assert not any("numpy" in p for p in packages)
+        assert any("scipy" in p for p in packages)
+
+
+
+# ---------------------------------------------------------------------------
+# TestInitShell
+# ---------------------------------------------------------------------------
+
+
+class TestInitShell:
+    """Test init-shell command for shell integration script generation."""
+
+    def test_init_shell_help(self, runner):
+        result = runner.invoke(app, ["init-shell", "--help"])
+        assert result.exit_code == 0
+        assert "bash" in result.output or "zsh" in result.output
+
+    def test_init_shell_bash_outputs_script(self, runner):
+        """init-shell bash prints an eval-able shell script."""
+        result = runner.invoke(app, ["init-shell", "bash"])
+        assert result.exit_code == 0
+        assert "PATH" in result.output or "envknit" in result.output
+
+    def test_init_shell_zsh_outputs_script(self, runner):
+        """init-shell zsh prints a zsh-compatible init script."""
+        result = runner.invoke(app, ["init-shell", "zsh"])
+        assert result.exit_code == 0
+        assert "PATH" in result.output or "envknit" in result.output
+
+    def test_init_shell_fish_outputs_script(self, runner):
+        """init-shell fish prints a fish-compatible init script."""
+        result = runner.invoke(app, ["init-shell", "fish"])
+        assert result.exit_code == 0
+        assert len(result.output) > 0
+
+    def test_init_shell_auto_with_mocked_detect(self, runner):
+        """init-shell auto uses detected shell and outputs script."""
+        with patch("envknit.isolation.shim.ShellIntegration.detect_current_shell") as mock_detect:
+            mock_detect.return_value = "bash"
+            result = runner.invoke(app, ["init-shell", "auto"])
+        assert result.exit_code in (0, 1)
+
+    def test_init_shell_bash_install_flag(self, runner):
+        """init-shell bash --install reports successful installation."""
+        with patch("envknit.isolation.shim.ShellIntegration.install_bash") as mock_install:
+            mock_install.return_value = True
+            result = runner.invoke(app, ["init-shell", "bash", "--install"])
+        assert result.exit_code == 0
+        assert "installed" in result.output.lower()
+
+
+
+# ---------------------------------------------------------------------------
+# TestAuto
+# ---------------------------------------------------------------------------
+
+
+class TestAuto:
+    """Test auto command for automatic environment detection."""
+
+    def test_auto_help(self, runner):
+        result = runner.invoke(app, ["auto", "--help"])
+        assert result.exit_code == 0
+        assert "--verbose" in result.output
+
+    def test_auto_without_project_exits_zero(self, tmp_path, monkeypatch, runner):
+        """auto exits 0 (not an error) when no envknit project is found."""
+        monkeypatch.chdir(tmp_path)
+        with patch("envknit.isolation.shim.ToolDispatcher.find_project_root") as mock_root:
+            mock_root.return_value = None
+            result = runner.invoke(app, ["auto"])
+        assert result.exit_code == 0
+
+    def test_auto_verbose_no_project(self, tmp_path, monkeypatch, runner):
+        """auto --verbose prints informational message when no project found."""
+        monkeypatch.chdir(tmp_path)
+        with patch("envknit.isolation.shim.ToolDispatcher.find_project_root") as mock_root:
+            mock_root.return_value = None
+            result = runner.invoke(app, ["auto", "--verbose"])
+        assert result.exit_code == 0
+        assert "no" in result.output.lower() or "envknit" in result.output.lower()
+
+    def test_auto_with_project_no_lock(self, initialized_project, runner):
+        """auto exits 0 when project exists but no lock file."""
+        with patch("envknit.isolation.shim.ToolDispatcher.find_project_root") as mock_root, \
+             patch("envknit.isolation.shim.ToolDispatcher.find_lock_file") as mock_lock:
+            mock_root.return_value = initialized_project
+            mock_lock.return_value = None
+            result = runner.invoke(app, ["auto"])
+        assert result.exit_code == 0
+
+    def test_auto_with_project_and_lock(self, initialized_project, runner):
+        """auto exits 0 when project has both config and lock file."""
+        lock_path = initialized_project / "envknit-lock.yaml"
+        lock_path.write_text("version: 1\nenvironments: {}\n")
+        with patch("envknit.isolation.shim.ToolDispatcher.find_project_root") as mock_root, \
+             patch("envknit.isolation.shim.ToolDispatcher.find_lock_file") as mock_lock:
+            mock_root.return_value = initialized_project
+            mock_lock.return_value = lock_path
+            result = runner.invoke(app, ["auto"])
+        assert result.exit_code == 0

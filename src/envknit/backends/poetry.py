@@ -753,8 +753,9 @@ class PoetryBackend(Backend):
             # Find the built file in dist/
             dist_dir = self._project_path / "dist"
             if dist_dir.exists():
+                expected_suffix = ".whl" if format == "wheel" else f".{format}"
                 for f in dist_dir.iterdir():
-                    if f.suffix == f".{format}" or (
+                    if f.suffix == expected_suffix or (
                         format == "sdist" and f.suffix == ".gz"
                     ):
                         return f
