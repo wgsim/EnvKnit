@@ -8,6 +8,7 @@ Designed for AI analysis with detailed selection reasoning.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,6 +21,71 @@ from envknit.core.resolver import Resolution
 
 LOCK_SCHEMA_VERSION = "1.0"
 RESOLVER_VERSION = "envknit-0.1.0"
+
+logger = logging.getLogger(__name__)
+
+
+class LockMigrationError(ValueError):
+    """Raised when a lock file schema migration cannot be completed."""
+
+
+def _migrate_schema(data: dict, from_version: str) -> dict:
+    """
+    Migrate lock file data from *from_version* to LOCK_SCHEMA_VERSION.
+
+    Only minor-version (additive) and pre-1.0 migrations are handled here.
+    Major-version mismatches (e.g. 2.x → 1.x) are NOT migrated and must be
+    caught upstream (SchemaVersionError in import_hook).
+
+    Args:
+        data: Raw dict loaded from the lock file.
+        from_version: The schema_version string found in the file, or ""
+                      when the key is absent (pre-1.0 format).
+
+    Returns:
+        Migrated dict (the same object, mutated in-place and returned).
+
+    Raises:
+        LockMigrationError: If the schema_version string cannot be parsed.
+    """
+    to_version = LOCK_SCHEMA_VERSION
+    to_major, to_minor = (int(x) for x in to_version.split(".", 1))
+
+    # Treat missing schema_version as "0.0" (pre-1.0 format)
+    if not from_version:
+        from_major, from_minor = 0, 0
+    else:
+        try:
+            parts = from_version.split(".", 1)
+            from_major = int(parts[0])
+            from_minor = int(parts[1]) if len(parts) > 1 else 0
+        except (ValueError, IndexError) as exc:
+            raise LockMigrationError(
+                f"Cannot parse schema_version '{from_version}': {exc}"
+            ) from exc
+
+    if from_major > to_major:
+        # Future major version — not our job to handle; return unchanged so the
+        # caller (import_hook.SchemaVersionError gate) can raise the right error.
+        return data
+
+    if from_major == to_major and from_minor >= to_minor:
+        # Nothing to do — version is current or newer minor (handled as no-op)
+        return data
+
+    # ── Chain of incremental migrations ──────────────────────────────────────
+
+    # Migration: pre-1.0 (no schema_version) → 1.0
+    if from_major == 0:
+        data.setdefault("packages", [])
+        # "environments" key may be absent; leave it as-is if present
+        from_major, from_minor = 1, 0
+
+    # Placeholder: future 1.x → 1.(x+1) migrations would be appended here.
+    # Each block should bump (from_major, from_minor) before proceeding.
+
+    data["schema_version"] = to_version
+    return data
 
 
 @dataclass
@@ -705,6 +771,16 @@ class LockFile:
 
         if not data:
             raise ValueError("Empty lock file")
+
+        loaded_version = data.get("schema_version", "")
+        if loaded_version != LOCK_SCHEMA_VERSION:
+            logger.warning(
+                "Lock file schema_version '%s' differs from current '%s'; "
+                "attempting automatic migration.",
+                loaded_version or "<absent>",
+                LOCK_SCHEMA_VERSION,
+            )
+            data = _migrate_schema(data, loaded_version)
 
         self.schema_version = data.get("schema_version", LOCK_SCHEMA_VERSION)
         self.lock_generated_at = data.get("lock_generated_at")

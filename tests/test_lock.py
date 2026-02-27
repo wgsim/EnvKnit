@@ -18,9 +18,11 @@ from envknit.core.lock import (
     GraphEdge,
     GraphNode,
     LockFile,
+    LockMigrationError,
     LockedPackage,
     ResolutionLogEntry,
     SelectionReason,
+    _migrate_schema,
 )
 
 
@@ -629,3 +631,79 @@ class TestLockFileLegacyLoad:
         lf = LockFile(path)
         lf.load()
         assert "default" in lf.environments
+
+
+# ── Schema migration ──────────────────────────────────────────────────────────
+
+class TestLockMigration:
+    """Tests for _migrate_schema() and its integration with LockFile.load()."""
+
+    def test_pre10_no_schema_version_key(self):
+        """Missing schema_version → migrated to current, packages defaulted."""
+        data = {}
+        result = _migrate_schema(data, "")
+        assert result["schema_version"] == LOCK_SCHEMA_VERSION
+        assert result["packages"] == []
+
+    def test_pre10_existing_packages_preserved(self):
+        """Pre-1.0 data with packages list keeps existing packages."""
+        data = {"packages": [{"name": "numpy", "version": "1.0"}]}
+        result = _migrate_schema(data, "")
+        assert len(result["packages"]) == 1
+        assert result["schema_version"] == LOCK_SCHEMA_VERSION
+
+    def test_no_migration_when_versions_match(self):
+        """Identical version → dict returned unchanged (no schema_version set again)."""
+        data = {"schema_version": LOCK_SCHEMA_VERSION, "packages": []}
+        result = _migrate_schema(data, LOCK_SCHEMA_VERSION)
+        assert result is data
+        assert result["schema_version"] == LOCK_SCHEMA_VERSION
+
+    def test_same_major_older_minor_migrates(self):
+        """1.0 file loaded when current is 1.x — should migrate and update version."""
+        import envknit.core.lock as lock_mod
+        original = lock_mod.LOCK_SCHEMA_VERSION
+        lock_mod.LOCK_SCHEMA_VERSION = "1.1"
+        try:
+            data = {"schema_version": "1.0", "packages": []}
+            result = _migrate_schema(data, "1.0")
+            assert result["schema_version"] == "1.1"
+        finally:
+            lock_mod.LOCK_SCHEMA_VERSION = original
+
+    def test_future_major_returns_unchanged(self):
+        """schema_version with future major (e.g. 2.0) returns data unchanged."""
+        data = {"schema_version": "2.0", "packages": [{"name": "x"}]}
+        result = _migrate_schema(data, "2.0")
+        assert result["schema_version"] == "2.0"
+        assert result["packages"] == [{"name": "x"}]
+
+    def test_load_triggers_migration_and_warns(self, tmp_path, caplog):
+        """LockFile.load() auto-migrates pre-1.0 files and emits a warning."""
+        import yaml
+        path = tmp_path / "old.lock"
+        path.write_text(yaml.dump({"packages": [{"name": "pkg", "version": "1.0"}]}))
+
+        import logging
+        with caplog.at_level(logging.WARNING, logger="envknit.core.lock"):
+            lf = LockFile(path)
+            lf.load()
+
+        assert lf.schema_version == LOCK_SCHEMA_VERSION
+        assert any("migration" in rec.message.lower() for rec in caplog.records)
+
+    def test_load_no_migration_when_current(self, tmp_path, caplog):
+        """LockFile.load() with current schema_version does not warn."""
+        import yaml
+        path = tmp_path / "current.lock"
+        path.write_text(yaml.dump({
+            "schema_version": LOCK_SCHEMA_VERSION,
+            "packages": [{"name": "pkg", "version": "1.0"}],
+        }))
+
+        import logging
+        with caplog.at_level(logging.WARNING, logger="envknit.core.lock"):
+            lf = LockFile(path)
+            lf.load()
+
+        assert not any("migration" in rec.message.lower() for rec in caplog.records)
