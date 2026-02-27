@@ -516,3 +516,418 @@ class TestEdgeCases:
         pkg = next((p for p in context.packages if p.name == "some-unknown-package"), None)
         assert pkg is not None
         # Purpose should be empty or inferred from name patterns
+
+
+# NEW_SECTION
+
+class TestIssueToMarkdownDetails:
+
+    def test_to_markdown_error_details_suggestion(self):
+        issue = Issue(
+            severity=IssueSeverity.ERROR,
+            package="pkg",
+            message="bad thing",
+            details="some detail",
+            suggestion="do this",
+        )
+        md = issue.to_markdown()
+        assert "some detail" in md
+        assert "do this" in md
+
+    def test_to_markdown_info_severity(self):
+        issue = Issue(severity=IssueSeverity.INFO, package="pkg", message="info msg")
+        md = issue.to_markdown()
+        assert "pkg" in md
+        assert "info msg" in md
+
+
+class TestRecommendationToMarkdownBranches:
+
+    def test_medium_priority_with_all_fields(self):
+        rec = Recommendation(
+            priority=RecommendationPriority.MEDIUM,
+            title="Fix something",
+            description="This is the description",
+            affected_packages=["pkgA", "pkgB"],
+            action="Do X",
+        )
+        md = rec.to_markdown()
+        assert "This is the description" in md
+        assert "pkgA, pkgB" in md
+        assert "Do X" in md
+
+    def test_low_priority_marker(self):
+        rec = Recommendation(
+            priority=RecommendationPriority.LOW,
+            title="Optional",
+            description="",
+        )
+        md = rec.to_markdown()
+        assert "Optional" in md
+
+
+class TestPackageAnalysisMarkdownBranches:
+
+    def test_no_purpose_no_rationale_omits_those_fields(self):
+        pkg = PackageAnalysis(name="bare", version="1.0.0", type="transitive")
+        md = pkg.to_markdown()
+        assert "bare 1.0.0" in md
+        assert "Purpose:" not in md
+        assert "Selection rationale:" not in md
+
+    def test_selection_rationale_appears(self):
+        pkg = PackageAnalysis(
+            name="foo", version="2.0.0", type="direct",
+            purpose="Something",
+            selection_rationale="User requested it",
+        )
+        md = pkg.to_markdown()
+        assert "Selection rationale: User requested it" in md
+
+    def test_many_depends_on_shows_plus_more(self):
+        pkg = PackageAnalysis(
+            name="heavy", version="1.0.0", type="direct",
+            depends_on=["a", "b", "c", "d", "e", "f", "g"],
+        )
+        md = pkg.to_markdown()
+        assert "+2 more" in md
+
+    def test_many_required_by_shows_plus_more(self):
+        pkg = PackageAnalysis(
+            name="popular", version="1.0.0", type="transitive",
+            required_by=["x", "y", "z", "w"],
+        )
+        md = pkg.to_markdown()
+        assert "+1 more" in md
+
+
+class TestAIContextMarkdownBranches:
+
+    def test_description_in_overview(self):
+        ctx = AIContext(
+            project_name="myproj",
+            project_version="1.0.0",
+            description="A cool project",
+        )
+        md = ctx.to_markdown()
+        assert "Description: A cool project" in md
+
+    def test_empty_dependency_summary_skips_stats(self):
+        ctx = AIContext(project_name="p", project_version="1.0.0", dependency_summary={})
+        md = ctx.to_markdown()
+        assert "Total packages:" not in md
+
+    def test_dependency_summary_stats_shown(self):
+        ctx = AIContext(
+            project_name="p", project_version="1.0.0",
+            dependency_summary={
+                "total_packages": 3,
+                "direct_dependencies": 2,
+                "transitive_dependencies": 1,
+            },
+        )
+        md = ctx.to_markdown()
+        assert "Total packages: 3" in md
+        assert "Direct dependencies: 2" in md
+        assert "Transitive dependencies: 1" in md
+
+    def test_packages_section_rendered(self):
+        ctx = AIContext(
+            project_name="p", project_version="1.0.0",
+            packages=[PackageAnalysis(name="numpy", version="1.0.0", type="direct")],
+        )
+        md = ctx.to_markdown()
+        assert "## Package Analysis" in md
+        assert "numpy" in md
+
+    def test_potential_issues_section_rendered(self):
+        ctx = AIContext(
+            project_name="p", project_version="1.0.0",
+            potential_issues=[Issue(severity=IssueSeverity.WARNING, package="foo", message="check")],
+        )
+        md = ctx.to_markdown()
+        assert "## Potential Issues" in md
+        assert "foo" in md
+
+    def test_recommendations_section_rendered(self):
+        ctx = AIContext(
+            project_name="p", project_version="1.0.0",
+            recommendations=[Recommendation(priority=RecommendationPriority.HIGH, title="Do X", description="r")],
+        )
+        md = ctx.to_markdown()
+        assert "## Recommendations" in md
+        assert "Do X" in md
+
+    def test_version_rationales_section_rendered(self):
+        ctx = AIContext(
+            project_name="p", project_version="1.0.0",
+            version_rationales={"numpy": "latest stable", "scipy": "required"},
+        )
+        md = ctx.to_markdown()
+        assert "## Version Selection Rationales" in md
+        assert "**numpy**" in md
+        assert "**scipy**" in md
+
+
+class TestDetectEnvironmentTypePaths:
+
+    def _make_lock_with(self, pkg_name):
+        lock = LockFile(path=Path("test.yaml"))
+        lock.add_package(
+            "default",
+            LockedPackage(
+                name=pkg_name,
+                version="1.0.0",
+                source="conda-forge",
+                selection_reason=SelectionReason(type="direct"),
+                dependencies=[],
+            ),
+        )
+        return lock
+
+    def test_data_science_type(self):
+        config = Config(name="ds", version="1.0.0")
+        gen = AIContextGenerator(config, self._make_lock_with("pandas"))
+        assert gen._detect_environment_type() == "data-science"
+
+    def test_web_development_type(self):
+        config = Config(name="web", version="1.0.0")
+        gen = AIContextGenerator(config, self._make_lock_with("flask"))
+        assert gen._detect_environment_type() == "web-development"
+
+    def test_cli_tool_type(self):
+        config = Config(name="cli", version="1.0.0")
+        gen = AIContextGenerator(config, self._make_lock_with("click"))
+        assert gen._detect_environment_type() == "cli-tool"
+
+
+class TestAnalyzePackagesWithAlternatives:
+
+    def test_alternatives_rationale_required_by(self):
+        from envknit.core.lock import Alternative
+        lock = LockFile(path=Path("t.yaml"))
+        lock.add_package(
+            "default",
+            LockedPackage(
+                name="requests",
+                version="2.31.0",
+                source="pypi",
+                selection_reason=SelectionReason(
+                    type="direct",
+                    rationale="user requested",
+                    required_by=["myapp"],
+                    alternatives_considered=[
+                        Alternative(version="2.30.0", rejected="older"),
+                    ],
+                ),
+                dependencies=[Dependency(name="urllib3", constraint=">=1.21")],
+            ),
+        )
+        config = Config(
+            name="proj", version="1.0.0",
+            environments={"default": EnvironmentConfig(python="3.11", packages=["requests"])},
+        )
+        ctx = AIContextGenerator(config, lock).generate()
+        pkg = next(p for p in ctx.packages if p.name == "requests")
+        assert pkg.selection_rationale == "user requested"
+        assert pkg.required_by == ["myapp"]
+        assert len(pkg.alternatives_considered) == 1
+        assert pkg.alternatives_considered[0]["version"] == "2.30.0"
+        assert pkg.alternatives_considered[0]["rejected"] == "older"
+        assert "urllib3" in pkg.depends_on
+
+
+class TestInferPurposeBranches:
+
+    def _gen(self):
+        return AIContextGenerator(Config(name="x", version="1.0.0"), None)
+
+    def test_test_in_name(self):
+        assert self._gen()._infer_purpose("pytest-something") == "Testing"
+
+    def test_lint_in_name(self):
+        assert self._gen()._infer_purpose("super-linter") == "Code quality"
+
+    def test_flake8_by_name(self):
+        assert self._gen()._infer_purpose("flake8") == "Code quality"
+
+    def test_format_in_name(self):
+        assert self._gen()._infer_purpose("autoformat") == "Code formatting"
+
+    def test_black_by_name(self):
+        assert self._gen()._infer_purpose("black") == "Code formatting"
+
+    def test_type_in_name(self):
+        assert self._gen()._infer_purpose("mytype-checker") == "Type checking"
+
+    def test_mypy_by_name(self):
+        assert self._gen()._infer_purpose("mypy") == "Type checking"
+
+    def test_doc_in_name(self):
+        assert self._gen()._infer_purpose("sphinx-docs") == "Documentation"
+
+    def test_db_in_name(self):
+        assert self._gen()._infer_purpose("mydb-client") == "Database"
+
+    def test_sql_in_name(self):
+        assert self._gen()._infer_purpose("psql-driver") == "Database"
+
+    def test_unknown_empty(self):
+        assert self._gen()._infer_purpose("completely-unknown-pkg") == ""
+
+
+class TestCheckVersionConstraintPaths:
+
+    def _gen(self):
+        return AIContextGenerator(Config(name="x", version="1.0.0"), None)
+
+    def test_unparseable_constraint_returns_true(self):
+        assert self._gen()._check_version_constraint("1.0.0", "NOT_VALID!!!") is True
+
+    def test_satisfied_constraint(self):
+        assert self._gen()._check_version_constraint("2.0.0", ">=1.0.0") is True
+
+    def test_unsatisfied_constraint(self):
+        assert self._gen()._check_version_constraint("0.9.0", ">=1.0.0") is False
+
+
+class TestCheckKnownIncompatPaths:
+
+    def _gen(self):
+        return AIContextGenerator(Config(name="x", version="1.0.0"), None)
+
+    def test_tensorflow_numpy2_error(self):
+        issues = self._gen()._check_known_incompatibilities({
+            "tensorflow": "2.15.0",
+            "numpy": "2.0.0",
+        })
+        assert len(issues) == 1
+        assert issues[0].severity == IssueSeverity.ERROR
+
+    def test_tensorflow_numpy1_no_issue(self):
+        issues = self._gen()._check_known_incompatibilities({
+            "tensorflow": "2.15.0",
+            "numpy": "1.26.4",
+        })
+        assert len(issues) == 0
+
+    def test_torch_tensorflow_warning(self):
+        issues = self._gen()._check_known_incompatibilities({
+            "torch": "2.0.0",
+            "tensorflow": "2.15.0",
+        })
+        assert len(issues) == 1
+        assert issues[0].severity == IssueSeverity.WARNING
+
+    def test_empty_no_issues(self):
+        assert self._gen()._check_known_incompatibilities({}) == []
+
+    def test_tensorflow_alone_no_issue(self):
+        assert self._gen()._check_known_incompatibilities({"tensorflow": "2.15.0"}) == []
+
+
+class TestGenerateRecommendationsPaths:
+
+    def _gen(self):
+        return AIContextGenerator(Config(name="x", version="1.0.0"), None)
+
+    def _pkgs(self, names):
+        return [PackageAnalysis(name=n, version="1.0.0", type="direct") for n in names]
+
+    def test_error_issue_with_suggestion_high_priority(self):
+        issues = [Issue(
+            severity=IssueSeverity.ERROR,
+            package="badpkg",
+            message="conflict",
+            suggestion="fix it",
+        )]
+        recs = self._gen()._generate_recommendations([], issues)
+        assert any("badpkg" in r.title for r in recs)
+        assert any(r.priority == RecommendationPriority.HIGH for r in recs)
+
+    def test_issue_without_suggestion_skipped(self):
+        issues = [Issue(severity=IssueSeverity.WARNING, package="p", message="minor")]
+        recs = self._gen()._generate_recommendations([], issues)
+        assert not any("p" in r.title for r in recs)
+
+    def test_many_packages_no_mypy_recommends_type_checking(self):
+        pkgs = self._pkgs(["a", "b", "c", "d", "e", "f"])
+        recs = self._gen()._generate_recommendations(pkgs, [])
+        assert any("type check" in r.title.lower() for r in recs)
+
+    def test_warning_issue_medium_priority(self):
+        issues = [Issue(
+            severity=IssueSeverity.WARNING,
+            package="warnpkg",
+            message="possible issue",
+            suggestion="maybe fix",
+        )]
+        recs = self._gen()._generate_recommendations([], issues)
+        assert any(r.priority == RecommendationPriority.MEDIUM for r in recs)
+
+    def test_no_test_framework_recommends_pytest(self):
+        pkgs = self._pkgs(["numpy"])
+        recs = self._gen()._generate_recommendations(pkgs, [])
+        assert any("test" in r.title.lower() for r in recs)
+
+
+class TestGetPythonVersionPaths:
+
+    def test_default_env_python(self):
+        config = Config(
+            name="x", version="1.0.0",
+            environments={"default": EnvironmentConfig(python="3.10", packages=[])},
+        )
+        gen = AIContextGenerator(config, None)
+        assert gen._get_python_version() == "3.10"
+
+    def test_fallback_to_first_env_when_no_default(self):
+        config = Config(
+            name="x", version="1.0.0",
+            environments={"prod": EnvironmentConfig(python="3.9", packages=[])},
+        )
+        gen = AIContextGenerator(config, None)
+        assert gen._get_python_version() == "3.9"
+
+    def test_fallback_to_311_when_no_envs(self):
+        config = Config(name="x", version="1.0.0")
+        gen = AIContextGenerator(config, None)
+        assert gen._get_python_version() == "3.11"
+
+
+class TestConvenienceMethodPaths:
+
+    def test_to_markdown_convenience(self):
+        config = Config(name="proj", version="2.0.0")
+        gen = AIContextGenerator(config, None)
+        md = gen.to_markdown()
+        assert "# Project Context: proj" in md
+
+    def test_to_json_convenience(self):
+        config = Config(name="proj", version="2.0.0")
+        gen = AIContextGenerator(config, None)
+        data = gen.to_json()
+        assert data["project"]["name"] == "proj"
+        assert "packages" in data
+
+
+class TestAnalyzePackagesNoSelectionReason:
+
+    def test_package_without_selection_reason(self):
+        lock = LockFile(path=Path("t.yaml"))
+        lock.add_package(
+            "default",
+            LockedPackage(
+                name="bare-pkg",
+                version="0.5.0",
+                source="pypi",
+                selection_reason=None,
+                dependencies=[],
+            ),
+        )
+        config = Config(name="proj", version="1.0.0")
+        ctx = AIContextGenerator(config, lock).generate()
+        pkg = next(p for p in ctx.packages if p.name == "bare-pkg")
+        assert pkg.selection_rationale == ""
+        assert pkg.required_by == []
+        assert pkg.alternatives_considered == []

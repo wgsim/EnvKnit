@@ -302,3 +302,306 @@ class TestLock:
 
             result = runner.invoke(app, ["lock", "--env", "nonexistent"])
         assert result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# tree command
+# ---------------------------------------------------------------------------
+
+
+class TestTree:
+    def test_tree_help(self, runner):
+        result = runner.invoke(app, ["tree", "--help"])
+        assert result.exit_code == 0
+        assert "--env" in result.output
+
+    def test_tree_without_lock_fails(self, initialized_project, runner):
+        """tree requires a lock file."""
+        result = runner.invoke(app, ["tree"])
+        assert result.exit_code != 0
+        assert "lock" in result.output.lower()
+
+    def test_tree_depth_option_in_help(self, runner):
+        result = runner.invoke(app, ["tree", "--help"])
+        assert "--depth" in result.output
+
+
+# ---------------------------------------------------------------------------
+# graph command
+# ---------------------------------------------------------------------------
+
+
+class TestGraph:
+    def test_graph_help(self, runner):
+        result = runner.invoke(app, ["graph", "--help"])
+        assert result.exit_code == 0
+        assert "--env" in result.output
+
+    def test_graph_without_lock_fails(self, initialized_project, runner):
+        """graph requires a lock file."""
+        result = runner.invoke(app, ["graph"])
+        assert result.exit_code != 0
+        assert "lock" in result.output.lower()
+
+    def test_graph_json_flag_in_help(self, runner):
+        result = runner.invoke(app, ["graph", "--help"])
+        assert "--json" in result.output
+
+
+# ---------------------------------------------------------------------------
+# why command
+# ---------------------------------------------------------------------------
+
+
+class TestWhy:
+    def test_why_help(self, runner):
+        result = runner.invoke(app, ["why", "--help"])
+        assert result.exit_code == 0
+        assert "package" in result.output.lower()
+
+    def test_why_without_config_fails(self, tmp_path, monkeypatch, runner):
+        """why exits non-zero when no envknit.yaml exists."""
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(app, ["why", "numpy"])
+        assert result.exit_code != 0
+
+    def test_why_without_lock_fails(self, initialized_project, runner):
+        """why exits non-zero when no lock file exists."""
+        result = runner.invoke(app, ["why", "numpy"])
+        assert result.exit_code != 0
+        assert "lock" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# run command
+# ---------------------------------------------------------------------------
+
+
+class TestRun:
+    def test_run_help(self, runner):
+        result = runner.invoke(app, ["run", "--help"])
+        assert result.exit_code == 0
+        assert "--env" in result.output
+
+    def test_run_without_init_fails(self, tmp_path, monkeypatch, runner):
+        """run exits non-zero when no envknit.yaml present."""
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(app, ["run", "python", "--version"])
+        assert result.exit_code != 0
+
+    def test_run_with_init_unavailable_env_fails(self, initialized_project, runner):
+        """run exits non-zero when target conda env does not exist."""
+        with patch("envknit.cli.main.get_backend") as mock_get_backend:
+            mock_backend = MagicMock()
+            mock_backend.list_environments.return_value = []
+            mock_get_backend.return_value = mock_backend
+
+            result = runner.invoke(app, ["run", "python", "script.py"])
+        assert result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# env command group
+# ---------------------------------------------------------------------------
+
+
+class TestEnvCmd:
+    def test_env_help(self, runner):
+        result = runner.invoke(app, ["env", "--help"])
+        assert result.exit_code == 0
+        assert "list" in result.output or "create" in result.output
+
+    def test_env_list_help(self, runner):
+        result = runner.invoke(app, ["env", "list", "--help"])
+        assert result.exit_code == 0
+
+    def test_env_list_without_init_fails(self, tmp_path, monkeypatch, runner):
+        """env list exits non-zero when no envknit.yaml present."""
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(app, ["env", "list"])
+        assert result.exit_code != 0
+
+    def test_env_list_with_init_shows_default(self, initialized_project, runner):
+        result = runner.invoke(app, ["env", "list"])
+        assert result.exit_code == 0
+        assert "default" in result.output
+
+    def test_env_create_help(self, runner):
+        result = runner.invoke(app, ["env", "create", "--help"])
+        assert result.exit_code == 0
+        assert "--python" in result.output
+
+    def test_env_create_without_init_fails(self, tmp_path, monkeypatch, runner):
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(app, ["env", "create", "myenv"])
+        assert result.exit_code != 0
+
+    def test_env_create_with_init_succeeds(self, initialized_project, runner):
+        result = runner.invoke(app, ["env", "create", "newenv"])
+        assert result.exit_code == 0
+        assert "newenv" in result.output
+
+    def test_env_remove_help(self, runner):
+        result = runner.invoke(app, ["env", "remove", "--help"])
+        assert result.exit_code == 0
+        assert "--force" in result.output
+
+    def test_env_remove_nonexistent_fails(self, initialized_project, runner):
+        result = runner.invoke(app, ["env", "remove", "nonexistent", "--force"])
+        assert result.exit_code != 0
+
+    def test_env_remove_existing_with_force(self, initialized_project, runner):
+        runner.invoke(app, ["env", "create", "tempenv"])
+        result = runner.invoke(app, ["env", "remove", "tempenv", "--force"])
+        assert result.exit_code == 0
+        assert "tempenv" in result.output
+
+
+# ---------------------------------------------------------------------------
+# store command group
+# ---------------------------------------------------------------------------
+
+
+class TestStoreCmd:
+    def test_store_help(self, runner):
+        result = runner.invoke(app, ["store", "--help"])
+        assert result.exit_code == 0
+        assert "list" in result.output
+
+    def test_store_list_help(self, runner):
+        result = runner.invoke(app, ["store", "list", "--help"])
+        assert result.exit_code == 0
+        assert "--package" in result.output or "--all" in result.output
+
+    def test_store_list_no_packages_exit_zero(self, tmp_path, monkeypatch, runner):
+        """store list exits 0 even when no packages installed."""
+        monkeypatch.chdir(tmp_path)
+        with patch("envknit.cli.main.EnvironmentStore") as mock_store_cls:
+            mock_store = MagicMock()
+            mock_store.list_installed.return_value = []
+            mock_store.PACKAGES_DIR = str(tmp_path / "store")
+            mock_store_cls.return_value = mock_store
+
+            result = runner.invoke(app, ["store", "list"])
+        assert result.exit_code == 0
+
+    def test_store_stats_help(self, runner):
+        result = runner.invoke(app, ["store", "stats", "--help"])
+        assert result.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# export command
+# ---------------------------------------------------------------------------
+
+
+class TestExport:
+    def test_export_help(self, runner):
+        result = runner.invoke(app, ["export", "--help"])
+        assert result.exit_code == 0
+        assert "--format" in result.output or "--for-ai" in result.output
+
+    def test_export_without_init_fails(self, tmp_path, monkeypatch, runner):
+        """export exits non-zero when no envknit.yaml present."""
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(app, ["export"])
+        assert result.exit_code != 0
+
+    def test_export_with_init_context_format(self, initialized_project, runner):
+        """export --format context succeeds with only a config (no lock needed)."""
+        result = runner.invoke(app, ["export", "--format", "context"])
+        assert result.exit_code == 0
+
+    def test_export_requirements_without_lock_fails(self, initialized_project, runner):
+        """export --format requirements requires a lock file."""
+        result = runner.invoke(app, ["export", "--format", "requirements"])
+        assert result.exit_code != 0
+        assert "lock" in result.output.lower()
+
+    def test_export_for_ai_markdown(self, initialized_project, runner):
+        """export --for-ai produces markdown output without error."""
+        result = runner.invoke(app, ["export", "--for-ai"])
+        assert result.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# security command group
+# ---------------------------------------------------------------------------
+
+
+class TestSecurityCmd:
+    def test_security_help(self, runner):
+        result = runner.invoke(app, ["security", "--help"])
+        assert result.exit_code == 0
+        assert "scan" in result.output
+
+    def test_security_scan_help(self, runner):
+        result = runner.invoke(app, ["security", "scan", "--help"])
+        assert result.exit_code == 0
+        assert "--env" in result.output
+
+    def test_security_check_help(self, runner):
+        result = runner.invoke(app, ["security", "check", "--help"])
+        assert result.exit_code == 0
+
+    def test_security_scan_without_init_fails(self, tmp_path, monkeypatch, runner):
+        """security scan exits non-zero without envknit.yaml."""
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(app, ["security", "scan"])
+        assert result.exit_code != 0
+
+    def test_security_scan_without_lock_fails(self, initialized_project, runner):
+        """security scan exits non-zero when no lock file exists."""
+        result = runner.invoke(app, ["security", "scan"])
+        assert result.exit_code != 0
+        assert "lock" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# install command
+# ---------------------------------------------------------------------------
+
+
+class TestInstall:
+    def test_install_help(self, runner):
+        result = runner.invoke(app, ["install", "--help"])
+        assert result.exit_code == 0
+        assert "--env" in result.output
+
+    def test_install_without_init_fails(self, tmp_path, monkeypatch, runner):
+        """install exits non-zero when no envknit.yaml present."""
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(app, ["install"])
+        assert result.exit_code != 0
+
+    def test_install_without_lock_fails(self, initialized_project, runner):
+        """install exits non-zero when no lock file exists."""
+        with patch("envknit.cli.main.get_backend") as mock_get_backend:
+            mock_backend = MagicMock()
+            mock_backend.is_available.return_value = True
+            mock_backend.name = "pip"
+            mock_get_backend.return_value = mock_backend
+
+            result = runner.invoke(app, ["install"])
+        assert result.exit_code != 0
+        assert "lock" in result.output.lower()
+
+    def test_install_with_unavailable_backend_after_lock_fails(self, initialized_project, runner):
+        """install exits non-zero when backend is unavailable (even with lock)."""
+        import yaml as _yaml
+
+        lock_data = {
+            "version": "1.0.0",
+            "generated_at": "2025-01-01T00:00:00",
+            "environments": {"default": []},
+        }
+        (initialized_project / "envknit-lock.yaml").write_text(_yaml.dump(lock_data))
+
+        with patch("envknit.cli.main.get_backend") as mock_get_backend:
+            mock_backend = MagicMock()
+            mock_backend.is_available.return_value = False
+            mock_backend.name = "conda"
+            mock_get_backend.return_value = mock_backend
+
+            result = runner.invoke(app, ["install"])
+        assert result.exit_code != 0

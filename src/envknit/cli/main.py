@@ -2578,7 +2578,7 @@ def deactivate() -> None:
     Usage:
         eval "$(envknit deactivate)"
     """
-    script = '''
+    script = r'''
 # EnvKnit deactivation
 export ENVKNIT_ACTIVE=0
 
