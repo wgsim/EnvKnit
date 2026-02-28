@@ -4,6 +4,7 @@ mod commands;
 mod config;
 mod error;
 mod lockfile;
+mod resolver;
 
 use anyhow::Result;
 use clap::Parser;

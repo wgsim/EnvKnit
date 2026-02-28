@@ -18,6 +18,8 @@ anyhow = "1"
 thiserror = "1"
 colored = "2"
 chrono = { version = "0.4", features = ["serde"] }
+semver = { version = "1", features = ["serde"] }
+reqwest = { version = "0.12", features = ["blocking", "json"] }
 
 [profile.release]
 strip = true
