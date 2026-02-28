@@ -33,9 +33,14 @@ pub fn run(env: Option<String>) -> Result<()> {
         println!();
         for env_name in &env_names {
             let pkgs = lock.packages_for_env(env_name);
-            println!("  {} {} ({} packages)", "▸".cyan(), env_name.bold(), pkgs.len());
+            let installed = pkgs.iter().filter(|p| p.install_path.is_some()).count();
+            println!(
+                "  {} {} ({} packages, {} installed)",
+                "▸".cyan(), env_name.bold(), pkgs.len(), installed
+            );
             for pkg in pkgs.iter().take(10) {
-                println!("    {} {}@{}", "·".dimmed(), pkg.name, pkg.version.green());
+                let status = if pkg.install_path.is_some() { "✓".green() } else { "·".yellow() };
+                println!("    {} {}@{}", status, pkg.name, pkg.version.green());
             }
             if pkgs.len() > 10 {
                 println!("    {} ... and {} more", "·".dimmed(), pkgs.len() - 10);
