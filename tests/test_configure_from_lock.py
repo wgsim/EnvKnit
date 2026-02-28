@@ -334,3 +334,124 @@ class TestFullLoop:
 
         with pytest.raises(CExtensionError, match="worker"):
             manager.use("clib", "1.0")
+
+
+# ---------------------------------------------------------------------------
+# Rust CLI output format compatibility
+# ---------------------------------------------------------------------------
+
+class TestRustCliLockCompatibility:
+    """Verify Python library parses lock files produced by the Rust CLI correctly.
+
+    The Rust CLI (envknit-cli) produces YAML with these characteristics:
+    - schema_version as a quoted string: "schema_version: '1.0'"
+    - install_path omitted when not installed (serde skip_serializing_if)
+    - install_path present after `envknit install` with full absolute path
+    - dependencies as a list of strings (name only, no version pin)
+    - lock_generated_at as RFC 3339 timestamp
+    - resolver_version as Cargo package version string
+    """
+
+    def _rust_lock_yaml(self, tmp_path: Path, with_install_path: bool = True) -> str:
+        """Return YAML string mimicking exact Rust CLI output format."""
+        install_path_line = (
+            f"    install_path: {tmp_path}/click/8.3.1\n"
+            if with_install_path else ""
+        )
+        return (
+            "schema_version: '1.0'\n"
+            "lock_generated_at: '2026-02-28T08:15:43.549974043+00:00'\n"
+            "resolver_version: 0.1.0\n"
+            "packages: []\n"
+            "environments:\n"
+            "  test:\n"
+            "  - name: click\n"
+            "    version: 8.3.1\n"
+            f"{install_path_line}"
+            "    dependencies:\n"
+            "    - colorama\n"
+            "  - name: colorama\n"
+            "    version: 0.4.6\n"
+            f"{'    install_path: ' + str(tmp_path) + '/colorama/0.4.6' + chr(10) if with_install_path else ''}"
+        )
+
+    def test_rust_lock_schema_version_accepted(self, tmp_path):
+        """Rust CLI uses quoted '1.0' — Python YAML parser must accept it."""
+        lock_path = tmp_path / "envknit.lock.yaml"
+        lock_path.write_text(self._rust_lock_yaml(tmp_path, with_install_path=False))
+
+        manager = ImportHookManager.get_instance()
+        # Should not raise SchemaVersionError
+        manager.configure_from_lock(str(lock_path))
+
+    def test_rust_lock_without_install_path_skipped(self, tmp_path):
+        """Packages without install_path (not yet installed) are skipped gracefully."""
+        lock_path = tmp_path / "envknit.lock.yaml"
+        lock_path.write_text(self._rust_lock_yaml(tmp_path, with_install_path=False))
+
+        manager = ImportHookManager.get_instance()
+        count = manager.configure_from_lock(str(lock_path))
+        # Neither click nor colorama have install_path → count == 0
+        assert count == 0
+
+    def test_rust_lock_with_install_path_registered(self, tmp_path):
+        """Packages with install_path (after envknit install) are registered."""
+        # Create fake install dirs so registry considers them valid
+        (tmp_path / "click" / "8.3.1").mkdir(parents=True)
+        (tmp_path / "colorama" / "0.4.6").mkdir(parents=True)
+
+        lock_path = tmp_path / "envknit.lock.yaml"
+        lock_path.write_text(self._rust_lock_yaml(tmp_path, with_install_path=True))
+
+        manager = ImportHookManager.get_instance()
+        count = manager.configure_from_lock(str(lock_path), env="test")
+        assert count == 2
+
+    def test_rust_lock_install_path_routes_correctly(self, tmp_path):
+        """install_path from Rust lock is stored verbatim in the registry."""
+        click_dir = tmp_path / "click" / "8.3.1"
+        click_dir.mkdir(parents=True)
+
+        lock_yaml = (
+            "schema_version: '1.0'\n"
+            "lock_generated_at: '2026-02-28T08:15:43+00:00'\n"
+            "resolver_version: 0.1.0\n"
+            "packages: []\n"
+            "environments:\n"
+            "  test:\n"
+            "  - name: click\n"
+            "    version: 8.3.1\n"
+            f"    install_path: {click_dir}\n"
+        )
+        lock_path = tmp_path / "envknit.lock.yaml"
+        lock_path.write_text(lock_yaml)
+
+        manager = ImportHookManager.get_instance()
+        manager.configure_from_lock(str(lock_path), env="test")
+
+        registered = manager.registry.get_package_path("click", "8.3.1")
+        assert registered == click_dir
+
+    def test_rust_lock_env_filter_isolates_correct_env(self, tmp_path):
+        """configure_from_lock(env='test') only loads packages in 'test'."""
+        (tmp_path / "click" / "8.3.1").mkdir(parents=True)
+
+        lock_yaml = (
+            "schema_version: '1.0'\n"
+            "lock_generated_at: '2026-02-28T08:15:43+00:00'\n"
+            "resolver_version: 0.1.0\n"
+            "packages: []\n"
+            "environments:\n"
+            "  test:\n"
+            f"  - name: click\n    version: 8.3.1\n    install_path: {tmp_path}/click/8.3.1\n"
+            "  prod:\n"
+            f"  - name: flask\n    version: 3.0.0\n    install_path: {tmp_path}/flask/3.0.0\n"
+        )
+        lock_path = tmp_path / "envknit.lock.yaml"
+        lock_path.write_text(lock_yaml)
+
+        manager = ImportHookManager.get_instance()
+        manager.configure_from_lock(str(lock_path), env="test")
+
+        assert manager.registry.get_package_path("click", "8.3.1") is not None
+        assert manager.registry.get_package_path("flask", "3.0.0") is None
