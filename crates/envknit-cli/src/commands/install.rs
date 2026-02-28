@@ -1,4 +1,3 @@
-use crate::backends;
 use crate::lockfile::LockFile;
 use anyhow::{Context, Result};
 use colored::Colorize;
@@ -7,7 +6,7 @@ use std::path::Path;
 pub fn run(env: Option<String>) -> Result<()> {
     let lock_path = LockFile::find(Path::new("."))
         .context("No envknit.lock.yaml found. Run `envknit lock` first.")?;
-    let lock = LockFile::load(&lock_path)?;
+    let mut lock = LockFile::load(&lock_path)?;
 
     let env_display = env.as_deref().unwrap_or("all");
     println!(
@@ -24,67 +23,92 @@ pub fn run(env: Option<String>) -> Result<()> {
 
     if envs_to_install.is_empty() {
         // Fall back to top-level packages list
-        install_packages(&lock.packages, "default", None)?;
+        install_packages(&mut lock.packages, "default")?;
     } else {
         for env_name in &envs_to_install {
-            let pkgs = lock.packages_for_env(env_name);
             println!("  Environment: {}", env_name.bold());
-            install_packages(
-                &pkgs.iter().map(|p| (*p).clone()).collect::<Vec<_>>(),
-                env_name,
-                None,
-            )?;
+            let pkgs = lock
+                .environments
+                .get_mut(env_name)
+                .map(|v| v.as_mut_slice())
+                .unwrap_or(&mut []);
+            install_packages(pkgs, env_name)?;
         }
     }
 
+    lock.save(&lock_path)?;
     println!("{} Installation complete.", "✓".green());
     Ok(())
 }
 
-fn install_packages(
-    packages: &[crate::lockfile::LockedPackage],
-    env_name: &str,
-    default_backend: Option<&str>,
-) -> Result<()> {
-    for pkg in packages {
+fn install_packages(packages: &mut [crate::lockfile::LockedPackage], env_name: &str) -> Result<()> {
+    let store_base = dirs_next::home_dir()
+        .context("Cannot determine home directory")?
+        .join(".envknit")
+        .join("packages");
+    std::fs::create_dir_all(&store_base)?;
+
+    for pkg in packages.iter_mut() {
         if pkg.install_path.is_some() {
             println!(
-                "    {} {} {} (already installed at {})",
+                "    {} {}=={} (cached)",
                 "→".cyan(),
-                pkg.name.bold(),
-                pkg.version,
-                pkg.install_path.as_deref().unwrap_or("")
+                pkg.name,
+                pkg.version
             );
             continue;
         }
 
-        let backend_name = pkg
-            .backend
-            .as_deref()
-            .or(default_backend)
-            .unwrap_or("pip");
+        let install_dir = store_base
+            .join(pkg.name.to_lowercase())
+            .join(&pkg.version);
 
+        if install_dir.exists() {
+            pkg.install_path = Some(install_dir.to_string_lossy().to_string());
+            println!(
+                "    {} {}=={} (found at {:?})",
+                "✓".green(),
+                pkg.name,
+                pkg.version,
+                install_dir
+            );
+            continue;
+        }
+
+        std::fs::create_dir_all(&install_dir)?;
+
+        let spec = format!("{}=={}", pkg.name, pkg.version);
         print!(
-            "    {} {} {}=={} via {}...",
+            "    {} {} {}...",
             "→".cyan(),
             "installing".dimmed(),
-            pkg.name.bold(),
-            pkg.version,
-            backend_name
+            spec.bold()
         );
+        std::io::Write::flush(&mut std::io::stdout())?;
 
-        let backend = backends::get_backend(backend_name)
-            .with_context(|| format!("Unknown backend '{}'", backend_name))?;
+        let output = std::process::Command::new("pip")
+            .args([
+                "install",
+                "--target",
+                &install_dir.to_string_lossy(),
+                &spec,
+                "--quiet",
+            ])
+            .output()
+            .context("Failed to run pip")?;
 
-        match backend.install(&pkg.name, &pkg.version, env_name) {
-            Ok(_) => println!(" {}", "done".green()),
-            Err(e) => {
-                println!(" {}", "FAILED".red());
-                return Err(e).with_context(|| {
-                    format!("Failed to install {}=={}", pkg.name, pkg.version)
-                });
-            }
+        if output.status.success() {
+            pkg.install_path = Some(install_dir.to_string_lossy().to_string());
+            println!(" {}", "done".green());
+        } else {
+            println!(" {}", "FAILED".red());
+            // Clean up partial directory
+            let _ = std::fs::remove_dir_all(&install_dir);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("pip install failed for {}: {}", spec, stderr);
         }
     }
+
+    let _ = env_name; // used in outer context for display only
     Ok(())
 }

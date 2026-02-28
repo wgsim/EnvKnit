@@ -82,6 +82,7 @@ pub fn run(update: Option<String>, dry_run: bool) -> Result<()> {
     lock.save(&lock_path)?;
 
     println!("{} Lock file written: {}", "✓".green(), lock_path.display());
+    println!("  Run `envknit install` to install packages to ~/.envknit/packages/");
     Ok(())
 }
 
