@@ -72,8 +72,36 @@ jobs:
           path: ${{ matrix.artifact_name }}
           retention-days: 7
 
+  test-rust:
+    name: Test Rust CLI
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Install system dependencies (Ubuntu)
+        run: sudo apt-get install -y pkg-config libssl-dev
+
+      - name: Run tests
+        run: cargo test --manifest-path crates/envknit-cli/Cargo.toml
+
   build-rust:
     name: Build Rust CLI (${{ matrix.os }})
+    needs: test-rust
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

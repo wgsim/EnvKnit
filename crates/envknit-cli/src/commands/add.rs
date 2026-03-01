@@ -27,3 +27,57 @@ pub fn run(package: String, env: String, _backend: Option<String>) -> Result<()>
     println!("  Run `envknit lock` to update the lock file");
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::init;
+    use crate::config::Config;
+    use std::fs;
+
+    fn tmpdir(label: &str) -> std::path::PathBuf {
+        let base = std::env::temp_dir().join(format!("envknit_add_{}_{}_{label}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().subsec_nanos()));
+        fs::create_dir_all(&base).unwrap();
+        base
+    }
+
+    fn setup(label: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        let dir = tmpdir(label);
+        let orig = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&dir).unwrap();
+        init::run("default".to_string(), None).unwrap();
+        (dir, orig)
+    }
+
+    #[test]
+    fn test_add_new_package() {
+        let _g = crate::GLOBAL_CWD_LOCK.lock().unwrap();
+        let (dir, orig) = setup("n");
+        run("numpy>=1.24".to_string(), "default".to_string(), None).unwrap();
+        std::env::set_current_dir(orig).unwrap();
+        let cfg = Config::load(&dir.join(crate::config::CONFIG_FILE)).unwrap();
+        assert_eq!(cfg.environments["default"].packages[0].name, "numpy");
+        assert_eq!(cfg.environments["default"].packages[0].version.as_deref(), Some(">=1.24"));
+    }
+
+    #[test]
+    fn test_add_without_version() {
+        let _g = crate::GLOBAL_CWD_LOCK.lock().unwrap();
+        let (dir, orig) = setup("v");
+        run("click".to_string(), "default".to_string(), None).unwrap();
+        std::env::set_current_dir(orig).unwrap();
+        let cfg = Config::load(&dir.join(crate::config::CONFIG_FILE)).unwrap();
+        assert_eq!(cfg.environments["default"].packages[0].name, "click");
+        assert!(cfg.environments["default"].packages[0].version.is_none());
+    }
+
+    #[test]
+    fn test_add_duplicate_fails() {
+        let _g = crate::GLOBAL_CWD_LOCK.lock().unwrap();
+        let (_dir, orig) = setup("d");
+        run("click".to_string(), "default".to_string(), None).unwrap();
+        let result = run("click".to_string(), "default".to_string(), None);
+        std::env::set_current_dir(orig).unwrap();
+        assert!(result.is_err());
+    }
+}

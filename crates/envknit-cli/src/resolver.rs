@@ -359,4 +359,67 @@ mod tests {
         assert_eq!(normalize_name("Typing-Extensions"), "typing_extensions");
         assert_eq!(normalize_name("my.package"), "my_package");
     }
+
+    #[test]
+    fn test_version_matches_empty_constraint() {
+        assert!(Resolver::version_matches("1.0", ""));
+    }
+
+    #[test]
+    fn test_version_matches_eq() {
+        assert!(Resolver::version_matches("1.0.0", "==1.0.0"));
+        assert!(!Resolver::version_matches("1.0.1", "==1.0.0"));
+    }
+
+    #[test]
+    fn test_version_matches_ne() {
+        assert!(Resolver::version_matches("1.0.0", "!=2.0.0"));
+        assert!(!Resolver::version_matches("2.0.0", "!=2.0.0"));
+    }
+
+    #[test]
+    fn test_version_matches_ge_le() {
+        assert!(Resolver::version_matches("2.0", ">=1.0"));
+        assert!(Resolver::version_matches("1.0", ">=1.0"));
+        assert!(!Resolver::version_matches("0.9", ">=1.0"));
+        assert!(Resolver::version_matches("1.0", "<=2.0"));
+        assert!(!Resolver::version_matches("2.1", "<=2.0"));
+    }
+
+    #[test]
+    fn test_version_matches_gt_lt() {
+        assert!(Resolver::version_matches("2.0", ">1.9"));
+        assert!(!Resolver::version_matches("1.9", ">1.9"));
+        assert!(Resolver::version_matches("1.0", "<2.0"));
+        assert!(!Resolver::version_matches("2.0", "<2.0"));
+    }
+
+    #[test]
+    fn test_version_matches_tilde() {
+        assert!(Resolver::version_matches("1.5", "~=1.4"));
+        assert!(!Resolver::version_matches("2.0", "~=1.4"));
+        assert!(!Resolver::version_matches("1.3", "~=1.4"));
+    }
+
+    #[test]
+    fn test_version_matches_compound() {
+        assert!(Resolver::version_matches("1.5", ">=1.0,<2.0"));
+        assert!(!Resolver::version_matches("2.0", ">=1.0,<2.0"));
+        assert!(!Resolver::version_matches("0.9", ">=1.0,<2.0"));
+    }
+
+    #[test]
+    fn test_compare_version_strings() {
+        use std::cmp::Ordering;
+        assert_eq!(Resolver::compare_version_strings("2.0", "1.9.9"), Ordering::Greater);
+        assert_eq!(Resolver::compare_version_strings("1.0", "1.0"), Ordering::Equal);
+        assert_eq!(Resolver::compare_version_strings("1.0", "1.0.1"), Ordering::Less);
+    }
+
+    #[test]
+    fn test_parse_requires_dist_earliest_op() {
+        let s = parse_requires_dist("urllib3<3,>=1.21.1").unwrap();
+        assert_eq!(s.name, "urllib3");
+        assert_eq!(s.version.as_deref(), Some("<3,>=1.21.1"));
+    }
 }

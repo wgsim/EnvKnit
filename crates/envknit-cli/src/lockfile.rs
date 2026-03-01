@@ -78,3 +78,90 @@ impl LockFile {
             .unwrap_or_else(|| self.packages.iter().collect())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::fs;
+
+    fn tmpdir(label: &str) -> std::path::PathBuf {
+        let base = std::env::temp_dir().join(format!(
+            "envknit_lock_{}_{}_{label}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .subsec_nanos()
+        ));
+        fs::create_dir_all(&base).unwrap();
+        base
+    }
+
+    fn pkg(name: &str, version: &str) -> LockedPackage {
+        LockedPackage { name: name.to_string(), version: version.to_string(), install_path: None, backend: None, dependencies: vec![] }
+    }
+
+    #[test]
+    fn test_lockfile_load_valid() {
+        let dir = tmpdir("load");
+        let path = dir.join(LOCK_FILE);
+        fs::write(&path, "schema_version: '1.0'\npackages: []\n").unwrap();
+        let lock = LockFile::load(&path).unwrap();
+        assert_eq!(lock.schema_version, "1.0");
+        assert!(lock.packages.is_empty());
+    }
+
+    #[test]
+    fn test_lockfile_future_major_rejected() {
+        let dir = tmpdir("future");
+        let path = dir.join(LOCK_FILE);
+        fs::write(&path, "schema_version: '99.0'\npackages: []\n").unwrap();
+        let result = LockFile::load(&path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("99.0"));
+    }
+
+    #[test]
+    fn test_lockfile_save_round_trip() {
+        let dir = tmpdir("rt");
+        let path = dir.join(LOCK_FILE);
+        let mut envs: HashMap<String, Vec<LockedPackage>> = HashMap::new();
+        envs.insert("default".to_string(), vec![pkg("numpy", "1.24.0"), pkg("click", "8.1.0")]);
+        let orig = LockFile { schema_version: LOCK_SCHEMA_VERSION.to_string(), lock_generated_at: None, resolver_version: None, packages: vec![], environments: envs };
+        orig.save(&path).unwrap();
+        let loaded = LockFile::load(&path).unwrap();
+        let pkgs = loaded.environments.get("default").unwrap();
+        assert_eq!(pkgs.len(), 2);
+        assert_eq!(pkgs[0].name, "numpy");
+    }
+
+    #[test]
+    fn test_lockfile_find_walks_up() {
+        let dir = tmpdir("wu");
+        let sub = dir.join("sub");
+        fs::create_dir_all(&sub).unwrap();
+        let lp = dir.join(LOCK_FILE);
+        let lock = LockFile { schema_version: LOCK_SCHEMA_VERSION.to_string(), lock_generated_at: None, resolver_version: None, packages: vec![], environments: Default::default() };
+        lock.save(&lp).unwrap();
+        assert_eq!(LockFile::find(&sub).unwrap(), lp);
+    }
+
+    #[test]
+    fn test_packages_for_env_returns_env_packages() {
+        let mut envs: HashMap<String, Vec<LockedPackage>> = HashMap::new();
+        envs.insert("default".to_string(), vec![pkg("numpy", "1.24.0")]);
+        let lock = LockFile { schema_version: LOCK_SCHEMA_VERSION.to_string(), lock_generated_at: None, resolver_version: None, packages: vec![pkg("click", "8.0.0")], environments: envs };
+        let pkgs = lock.packages_for_env("default");
+        assert_eq!(pkgs.len(), 1);
+        assert_eq!(pkgs[0].name, "numpy");
+    }
+
+    #[test]
+    fn test_packages_for_env_falls_back_to_packages() {
+        let lock = LockFile { schema_version: LOCK_SCHEMA_VERSION.to_string(), lock_generated_at: None, resolver_version: None, packages: vec![pkg("click", "8.0.0")], environments: Default::default() };
+        let pkgs = lock.packages_for_env("nonexistent");
+        assert_eq!(pkgs.len(), 1);
+        assert_eq!(pkgs[0].name, "click");
+    }
+}

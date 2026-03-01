@@ -79,3 +79,95 @@ impl PackageSpec {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn tmpdir(label: &str) -> std::path::PathBuf {
+        let base = std::env::temp_dir().join(format!(
+            "envknit_cfg_{}_{}_{label}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .subsec_nanos()
+        ));
+        fs::create_dir_all(&base).unwrap();
+        base
+    }
+
+    #[test]
+    fn test_parse_name_only() {
+        let s = PackageSpec::parse("numpy");
+        assert_eq!(s.name, "numpy");
+        assert!(s.version.is_none());
+    }
+
+    #[test]
+    fn test_parse_with_eq() {
+        let s = PackageSpec::parse("numpy==1.26.4");
+        assert_eq!(s.name, "numpy");
+        assert_eq!(s.version.as_deref(), Some("==1.26.4"));
+    }
+
+    #[test]
+    fn test_parse_with_ge_compound() {
+        let s = PackageSpec::parse("click>=8.0,<9.0");
+        assert_eq!(s.name, "click");
+        assert_eq!(s.version.as_deref(), Some(">=8.0,<9.0"));
+    }
+
+    #[test]
+    fn test_parse_with_tilde() {
+        let s = PackageSpec::parse("requests~=2.28");
+        assert_eq!(s.name, "requests");
+        assert_eq!(s.version.as_deref(), Some("~=2.28"));
+    }
+
+    #[test]
+    fn test_parse_trims_whitespace() {
+        let s = PackageSpec::parse("  numpy  ");
+        assert_eq!(s.name, "numpy");
+    }
+
+    #[test]
+    fn test_config_save_and_load() {
+        let dir = tmpdir("round_trip");
+        let path = dir.join(CONFIG_FILE);
+        let mut envs = HashMap::new();
+        envs.insert("default".to_string(), EnvironmentConfig {
+            packages: vec![PackageSpec { name: "click".to_string(), version: Some(">=8.0".to_string()), extras: vec![] }],
+            backend: None,
+            python_version: None,
+        });
+        let cfg = Config { envknit_version: Some("0.1.0".to_string()), environments: envs };
+        cfg.save(&path).unwrap();
+
+        let loaded = Config::load(&path).unwrap();
+        assert!(loaded.environments.contains_key("default"));
+        assert_eq!(loaded.environments["default"].packages[0].name, "click");
+    }
+
+    #[test]
+    fn test_config_find_walks_up() {
+        let dir = tmpdir("walkup");
+        let sub = dir.join("sub");
+        fs::create_dir_all(&sub).unwrap();
+        let cfg_path = dir.join(CONFIG_FILE);
+        let cfg = Config { envknit_version: None, environments: HashMap::new() };
+        cfg.save(&cfg_path).unwrap();
+
+        let found = Config::find(&sub);
+        assert!(found.is_some());
+        assert_eq!(found.unwrap(), cfg_path);
+    }
+
+    #[test]
+    fn test_config_find_returns_none() {
+        let dir = tmpdir("notfound");
+        let found = Config::find(&dir);
+        assert!(found.is_none());
+    }
+}
