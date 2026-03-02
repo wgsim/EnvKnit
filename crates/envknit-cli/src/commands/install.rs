@@ -1,7 +1,8 @@
-use crate::lockfile::LockFile;
+use crate::lockfile::{LockedPackage, LockFile};
 use anyhow::{Context, Result};
 use colored::Colorize;
-use std::path::Path;
+use rayon::prelude::*;
+use std::path::{Path, PathBuf};
 
 pub fn run(env: Option<String>, no_dev: bool) -> Result<()> {
     let lock_path = LockFile::find(Path::new("."))
@@ -23,11 +24,9 @@ pub fn run(env: Option<String>, no_dev: bool) -> Result<()> {
     };
 
     if envs_to_install.is_empty() {
-        // Fall back to top-level packages list
         let pkgs: Vec<_> = lock.packages.iter_mut()
             .filter(|p| !no_dev || !p.dev)
             .collect();
-        // SAFETY: we own the vec and the iterator borrows mutably
         install_packages_mut(pkgs, "default")?;
     } else {
         for env_name in &envs_to_install {
@@ -46,74 +45,90 @@ pub fn run(env: Option<String>, no_dev: bool) -> Result<()> {
     Ok(())
 }
 
-fn install_packages_mut(packages: Vec<&mut crate::lockfile::LockedPackage>, env_name: &str) -> Result<()> {
+/// Install a batch of packages, running new installs in parallel via rayon.
+/// Already-cached packages are identified first (sequential), then new packages
+/// are installed concurrently.
+fn install_packages_mut(mut packages: Vec<&mut LockedPackage>, _env_name: &str) -> Result<()> {
     let store_base = dirs_next::home_dir()
         .context("Cannot determine home directory")?
         .join(".envknit")
         .join("packages");
     std::fs::create_dir_all(&store_base)?;
 
-    for pkg in packages.into_iter() {
+    // Split into already-handled and needs-install
+    let mut to_install: Vec<(usize, String, String, PathBuf)> = Vec::new();
+
+    for (i, pkg) in packages.iter().enumerate() {
         if pkg.install_path.is_some() {
-            println!(
-                "    {} {}=={} (cached)",
-                "→".cyan(),
-                pkg.name,
-                pkg.version
-            );
+            println!("    {} {}=={} (cached)", "→".cyan(), pkg.name, pkg.version);
             continue;
         }
-
         let install_dir = store_base
             .join(pkg.name.to_lowercase())
             .join(&pkg.version);
-
         if install_dir.exists() {
-            pkg.install_path = Some(install_dir.to_string_lossy().to_string());
-            println!(
-                "    {} {}=={} (found at {:?})",
-                "✓".green(),
-                pkg.name,
-                pkg.version,
-                install_dir
-            );
-            continue;
+            // Already on disk — just update path (done below after parallel phase)
         }
+        to_install.push((i, pkg.name.clone(), pkg.version.clone(), install_dir));
+    }
 
-        std::fs::create_dir_all(&install_dir)?;
+    // Parallel install: each entry is (index, name, version, dir)
+    let results: Vec<(usize, PathBuf, Result<(), String>)> = to_install
+        .into_par_iter()
+        .map(|(i, name, version, install_dir)| {
+            if install_dir.exists() {
+                return (i, install_dir, Ok(()));
+            }
+            if let Err(e) = std::fs::create_dir_all(&install_dir) {
+                return (i, install_dir, Err(e.to_string()));
+            }
 
-        let spec = format!("{}=={}", pkg.name, pkg.version);
-        print!(
-            "    {} {} {}...",
-            "→".cyan(),
-            "installing".dimmed(),
-            spec.bold()
-        );
-        std::io::Write::flush(&mut std::io::stdout())?;
+            let spec = format!("{}=={}", name, version);
+            let output = std::process::Command::new("pip")
+                .args(["install", "--target", &install_dir.to_string_lossy(), &spec, "--quiet"])
+                .output();
 
-        let output = std::process::Command::new("pip")
-            .args([
-                "install",
-                "--target",
-                &install_dir.to_string_lossy(),
-                &spec,
-                "--quiet",
-            ])
-            .output()
-            .context("Failed to run pip")?;
+            match output {
+                Err(e) => {
+                    let _ = std::fs::remove_dir_all(&install_dir);
+                    (i, install_dir, Err(format!("pip exec failed: {}", e)))
+                }
+                Ok(out) if out.status.success() => (i, install_dir, Ok(())),
+                Ok(out) => {
+                    let _ = std::fs::remove_dir_all(&install_dir);
+                    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                    (i, install_dir, Err(stderr))
+                }
+            }
+        })
+        .collect();
 
-        if output.status.success() {
-            pkg.install_path = Some(install_dir.to_string_lossy().to_string());
-            println!(" {}", "done".green());
-        } else {
-            println!(" {}", "FAILED".red());
-            // Clean up partial directory
-            let _ = std::fs::remove_dir_all(&install_dir);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("pip install failed for {}: {}", spec, stderr);
+    // Apply results back to packages and report
+    let mut first_err: Option<String> = None;
+    for (i, install_dir, outcome) in results {
+        let pkg = &mut packages[i];
+        match outcome {
+            Ok(()) => {
+                pkg.install_path = Some(install_dir.to_string_lossy().to_string());
+                let was_cached = install_dir.exists();
+                if was_cached {
+                    println!("    {} {}=={} (found at {:?})", "✓".green(), pkg.name, pkg.version, install_dir);
+                } else {
+                    println!("    {} {}=={} {}", "✓".green(), pkg.name, pkg.version, "installed".green());
+                }
+            }
+            Err(e) => {
+                println!("    {} {}=={} {}", "✗".red(), pkg.name, pkg.version, "FAILED".red());
+                if first_err.is_none() {
+                    first_err = Some(format!("pip install failed for {}=={}: {}", pkg.name, pkg.version, e));
+                }
+            }
         }
     }
 
-    let _ = env_name; // used in outer context for display only
+    if let Some(err) = first_err {
+        anyhow::bail!("{}", err);
+    }
+
     Ok(())
 }

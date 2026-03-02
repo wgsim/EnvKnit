@@ -7,7 +7,7 @@ use colored::Colorize;
 use std::collections::HashMap;
 use std::path::Path;
 
-pub fn run(update: Option<String>, dry_run: bool) -> Result<()> {
+pub fn run(update: Option<String>, dry_run: bool, env: Option<String>) -> Result<()> {
     let config_path = Config::find(Path::new("."))
         .context("No envknit.yaml found. Run `envknit init` first.")?;
     let config = Config::load(&config_path)?;
@@ -18,12 +18,23 @@ pub fn run(update: Option<String>, dry_run: bool) -> Result<()> {
     if let Some(ref pkg) = update {
         println!("{} Updating package: {}", "→".cyan(), pkg.bold());
     }
+    if let Some(ref e) = env {
+        if !config.environments.contains_key(e) {
+            anyhow::bail!("Environment '{}' not found in config", e);
+        }
+        println!("{} Locking environment: {}", "→".cyan(), e.bold());
+    }
 
     println!("{} Resolving dependencies...", "→".cyan());
 
     let mut env_packages: HashMap<String, Vec<LockedPackage>> = HashMap::new();
 
     for (env_name, env_config) in &config.environments {
+        if let Some(ref filter) = env {
+            if env_name != filter {
+                continue;
+            }
+        }
         println!("  Environment: {}", env_name.bold());
 
         // If --update <pkg> filter to only that package in this env

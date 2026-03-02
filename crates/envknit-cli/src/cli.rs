@@ -4,6 +4,18 @@ use clap::{Parser, Subcommand};
 pub enum EnvAction {
     /// List all environments
     List,
+    /// Create a new environment
+    Create {
+        /// Environment name
+        name: String,
+        #[arg(long)]
+        backend: Option<String>,
+    },
+    /// Remove an environment
+    Remove {
+        /// Environment name
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -70,6 +82,9 @@ pub enum Commands {
         update: Option<String>,
         #[arg(long)]
         dry_run: bool,
+        /// Only re-lock a specific environment
+        #[arg(long)]
+        env: Option<String>,
     },
     /// Install packages from lock file
     Install {

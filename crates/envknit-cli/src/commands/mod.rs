@@ -1,5 +1,7 @@
 pub mod add;
+pub mod env_create;
 pub mod env_list;
+pub mod env_remove;
 pub mod export;
 pub mod graph;
 pub mod init;
@@ -23,7 +25,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         Commands::Init { env, backend } => init::run(env, backend),
         Commands::Add { package, env, backend, dev } => add::run(package, env, backend, dev),
         Commands::Remove { package, env, dev } => remove::run(package, env, dev),
-        Commands::Lock { update, dry_run } => lock::run(update, dry_run),
+        Commands::Lock { update, dry_run, env } => lock::run(update, dry_run, env),
         Commands::Install { env, no_dev } => install::run(env, no_dev),
         Commands::Status { env } => status::run(env),
         Commands::Tree { env, depth } => tree::run(env, depth),
@@ -32,6 +34,8 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         Commands::Export { format, output, no_dev } => export::run(format, output, no_dev),
         Commands::Env { action } => match action {
             EnvAction::List => env_list::run(),
+            EnvAction::Create { name, backend } => env_create::run(name, backend),
+            EnvAction::Remove { name } => env_remove::run(name),
         },
         Commands::Run { env, command } => run::run(env, command),
         Commands::Store { action } => match action {
