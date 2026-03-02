@@ -11,13 +11,12 @@ they run _worker_main instead of the full CLI.
 """
 
 import multiprocessing
-import sys
 
 # Must be called before any other code when frozen (PyInstaller onefile).
 # Has no effect in a normal Python interpreter.
 multiprocessing.freeze_support()
 
-from envknit.cli.main import app  # noqa: E402
+from envknit.cli.main import main  # noqa: E402
 
 if __name__ == "__main__":
-    sys.exit(app())
+    main()

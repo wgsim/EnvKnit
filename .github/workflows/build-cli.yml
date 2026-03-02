@@ -11,67 +11,6 @@ on:
     branches: [main]
 
 jobs:
-  build:
-    name: Build (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            artifact_name: envknit-linux-amd64
-            binary_path: dist/envknit
-          - os: macos-latest
-            artifact_name: envknit-macos-amd64
-            binary_path: dist/envknit
-          - os: windows-latest
-            artifact_name: envknit-windows-amd64.exe
-            binary_path: dist/envknit.exe
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: "pip"
-
-      - name: Install CLI extras and build tools
-        run: |
-          pip install --upgrade pip
-          pip install -e ".[cli]"
-          pip install "pyinstaller>=6.0"
-
-      - name: Build standalone binary
-        run: python -m PyInstaller --noconfirm envknit-cli.spec
-
-      - name: Smoke test binary (Unix)
-        if: runner.os != 'Windows'
-        run: |
-          ${{ matrix.binary_path }} --version
-          ${{ matrix.binary_path }} --help
-
-      - name: Smoke test binary (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          & "${{ matrix.binary_path }}" --version
-          & "${{ matrix.binary_path }}" --help
-
-      - name: Rename binary to platform artifact name
-        shell: bash
-        run: cp "${{ matrix.binary_path }}" "${{ matrix.artifact_name }}"
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.artifact_name }}
-          retention-days: 7
-
   test-rust:
     name: Test Rust CLI
     runs-on: ubuntu-latest
@@ -108,13 +47,13 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            artifact_name: envknit-rust-linux-amd64
+            artifact_name: envknit-linux-amd64
             binary_path: target/release/envknit
           - os: macos-latest
-            artifact_name: envknit-rust-macos-amd64
+            artifact_name: envknit-macos-amd64
             binary_path: target/release/envknit
           - os: windows-latest
-            artifact_name: envknit-rust-windows-amd64.exe
+            artifact_name: envknit-windows-amd64.exe
             binary_path: target/release/envknit.exe
 
     steps:
@@ -166,10 +105,10 @@ jobs:
           retention-days: 7
 
   # ── Release upload ──────────────────────────────────────────────────────────
-  # Only runs on version tag pushes (e.g., v0.2.0)
+  # Only runs on version tag pushes (e.g., v1.0.0)
   release:
     name: Upload to GitHub Release
-    needs: [build, build-rust]
+    needs: [build-rust]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
 
@@ -189,7 +128,4 @@ jobs:
             artifacts/envknit-linux-amd64/envknit-linux-amd64
             artifacts/envknit-macos-amd64/envknit-macos-amd64
             artifacts/envknit-windows-amd64.exe/envknit-windows-amd64.exe
-            artifacts/envknit-rust-linux-amd64/envknit-rust-linux-amd64
-            artifacts/envknit-rust-macos-amd64/envknit-rust-macos-amd64
-            artifacts/envknit-rust-windows-amd64.exe/envknit-rust-windows-amd64.exe
           draft: false
