@@ -2,6 +2,7 @@ use crate::lockfile::{LockedPackage, LockFile};
 use anyhow::{Context, Result};
 use colored::Colorize;
 use rayon::prelude::*;
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
 pub fn run(env: Option<String>, no_dev: bool, auto_cleanup: bool) -> Result<()> {
@@ -115,7 +116,9 @@ fn install_packages_mut(mut packages: Vec<&mut LockedPackage>, _env_name: &str) 
         let pkg = &mut packages[i];
         match outcome {
             Ok(()) => {
-                pkg.install_path = Some(install_dir.to_string_lossy().to_string());
+                let path_str = install_dir.to_string_lossy().to_string();
+                pkg.install_path = Some(path_str.clone());
+                pkg.sha256 = Some(hash_dir(&install_dir));
                 let was_cached = install_dir.exists();
                 if was_cached {
                     println!("    {} {}=={} (found at {:?})", "✓".green(), pkg.name, pkg.version, install_dir);
@@ -137,4 +140,36 @@ fn install_packages_mut(mut packages: Vec<&mut LockedPackage>, _env_name: &str) 
     }
 
     Ok(())
+}
+
+/// Compute a deterministic SHA-256 of a directory tree.
+/// Files are sorted by path so the hash is stable across runs.
+pub fn hash_dir(dir: &PathBuf) -> String {
+    let mut hasher = Sha256::new();
+    let mut paths: Vec<PathBuf> = Vec::new();
+
+    fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    collect(&p, out);
+                } else {
+                    out.push(p);
+                }
+            }
+        }
+    }
+
+    collect(dir, &mut paths);
+    paths.sort();
+
+    for path in &paths {
+        if let Ok(data) = std::fs::read(path) {
+            hasher.update(path.to_string_lossy().as_bytes());
+            hasher.update(&data);
+        }
+    }
+
+    hex::encode(hasher.finalize())
 }

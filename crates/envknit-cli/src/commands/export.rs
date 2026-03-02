@@ -67,7 +67,7 @@ mod tests {
     }
 
     fn mkpkg(name: &str, version: &str) -> LockedPackage {
-        LockedPackage { name: name.to_string(), version: version.to_string(), install_path: None, backend: None, dependencies: vec![], dev: false }
+        LockedPackage { name: name.to_string(), version: version.to_string(), install_path: None, backend: None, dependencies: vec![], dev: false, sha256: None }
     }
 
     fn write_lock(dir: &std::path::Path, envs: HashMap<String, Vec<LockedPackage>>) {

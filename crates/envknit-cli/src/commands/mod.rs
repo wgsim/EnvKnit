@@ -1,6 +1,7 @@
 pub mod add;
 pub mod check;
 pub mod diff;
+pub mod doctor;
 pub mod env_create;
 pub mod env_list;
 pub mod env_remove;
@@ -11,12 +12,14 @@ pub mod init_shell;
 pub mod install;
 pub mod lock;
 pub mod pin;
+pub mod publish;
 pub mod remove;
 pub mod run;
 pub mod status;
 pub mod store;
 pub mod tree;
 pub mod upgrade;
+pub mod verify;
 pub mod why;
 
 use crate::cli::{Cli, Commands, EnvAction, StoreAction};
@@ -30,7 +33,9 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         Commands::Remove { package, env, dev } => remove::run(package, env, dev),
         Commands::Lock { update, dry_run, env } => lock::run(update, dry_run, env),
         Commands::Install { env, no_dev, auto_cleanup } => install::run(env, no_dev, auto_cleanup),
+        Commands::Doctor => doctor::run(),
         Commands::Check => check::run(),
+        Commands::Verify { env } => verify::run(env),
         Commands::Diff { base, head, env } => diff::run(base, head, env),
         Commands::Status { env } => status::run(env),
         Commands::Tree { env, depth } => tree::run(env, depth),
@@ -49,6 +54,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             StoreAction::Cleanup { dry_run } => store::cleanup(dry_run),
         },
         Commands::InitShell { shell } => init_shell::run(shell),
+        Commands::Publish { repository, dry_run } => publish::run(repository, dry_run),
         Commands::Pin { env, package } => pin::run(env, package),
         Commands::Upgrade { package, env, version } => upgrade::run(package, env, version),
     }

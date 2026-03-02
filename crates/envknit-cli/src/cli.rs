@@ -97,8 +97,15 @@ pub enum Commands {
         #[arg(long)]
         auto_cleanup: bool,
     },
+    /// Diagnose environment (pip, python, pyenv, mise, config, lock file)
+    Doctor,
     /// Verify config and lock file are in sync (useful in CI)
     Check,
+    /// Verify integrity of installed packages using recorded SHA-256 hashes
+    Verify {
+        #[arg(long)]
+        env: Option<String>,
+    },
     /// Compare two lock files and show added/removed/changed packages
     Diff {
         /// Base lock file path
@@ -172,6 +179,15 @@ pub enum Commands {
         /// Shell name (bash/zsh/fish); defaults to $SHELL
         #[arg(long)]
         shell: Option<String>,
+    },
+    /// Build and publish to PyPI (wraps `build` + `twine`)
+    Publish {
+        /// PyPI repository name (default: pypi)
+        #[arg(long, default_value = "pypi")]
+        repository: String,
+        /// Show what would be run without executing
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Pin config packages to exact versions from the lock file
     Pin {

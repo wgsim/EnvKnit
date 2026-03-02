@@ -83,6 +83,7 @@ mod tests {
             backend: None,
             dependencies: vec![],
             dev: false,
+            sha256: None,
         }]);
         let lock = LockFile {
             schema_version: LOCK_SCHEMA_VERSION.to_string(),
@@ -122,8 +123,8 @@ mod tests {
         // Write lock with both packages
         let mut envs = HashMap::new();
         envs.insert("default".to_string(), vec![
-            LockedPackage { name: "numpy".to_string(), version: "1.26.4".to_string(), install_path: None, backend: None, dependencies: vec![], dev: false },
-            LockedPackage { name: "click".to_string(), version: "8.1.7".to_string(), install_path: None, backend: None, dependencies: vec![], dev: false },
+            LockedPackage { name: "numpy".to_string(), version: "1.26.4".to_string(), install_path: None, backend: None, dependencies: vec![], dev: false, sha256: None },
+            LockedPackage { name: "click".to_string(), version: "8.1.7".to_string(), install_path: None, backend: None, dependencies: vec![], dev: false, sha256: None },
         ]);
         let lock = LockFile { schema_version: LOCK_SCHEMA_VERSION.to_string(), lock_generated_at: None, resolver_version: None, packages: vec![], environments: envs };
         lock.save(&dir.join(crate::lockfile::LOCK_FILE)).unwrap();

@@ -112,6 +112,7 @@ impl Resolver {
                     backend: None,
                     dependencies: dep_names,
                     dev: false,
+                    sha256: None,
                 },
             );
         }

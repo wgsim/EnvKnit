@@ -19,6 +19,9 @@ pub struct LockedPackage {
     /// True if this package belongs to the dev_packages list.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub dev: bool,
+    /// SHA-256 of the installed directory tree (set after `envknit install`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -102,7 +105,7 @@ mod tests {
     }
 
     fn pkg(name: &str, version: &str) -> LockedPackage {
-        LockedPackage { name: name.to_string(), version: version.to_string(), install_path: None, backend: None, dependencies: vec![], dev: false }
+        LockedPackage { name: name.to_string(), version: version.to_string(), install_path: None, backend: None, dependencies: vec![], dev: false, sha256: None }
     }
 
     #[test]
