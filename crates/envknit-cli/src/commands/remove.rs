@@ -42,7 +42,7 @@ mod tests {
         let orig = std::env::current_dir().unwrap();
         std::env::set_current_dir(&dir).unwrap();
         init::run("default".to_string(), None).unwrap();
-        add::run("numpy".to_string(), "default".to_string(), None).unwrap();
+        add::run("numpy".to_string(), "default".to_string(), None, false).unwrap();
         (dir, orig)
     }
 

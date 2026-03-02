@@ -13,6 +13,7 @@ pub fn run(env: String, backend: Option<String>) -> Result<()> {
     let mut environments = HashMap::new();
     environments.insert(env.clone(), EnvironmentConfig {
         packages: vec![],
+        dev_packages: vec![],
         backend,
         python_version: None,
     });

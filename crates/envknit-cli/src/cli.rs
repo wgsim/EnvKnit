@@ -51,6 +51,9 @@ pub enum Commands {
         env: String,
         #[arg(long)]
         backend: Option<String>,
+        /// Add as a development dependency
+        #[arg(long)]
+        dev: bool,
     },
     /// Remove a package from the configuration
     Remove {
@@ -121,5 +124,15 @@ pub enum Commands {
     Store {
         #[command(subcommand)]
         action: StoreAction,
+    },
+    /// Upgrade package(s) to latest (removes == pins; keeps flexible constraints)
+    Upgrade {
+        /// Package name (upgrades all if omitted)
+        package: Option<String>,
+        #[arg(long, default_value = "default")]
+        env: String,
+        /// Pin to an explicit version instead of unpinning
+        #[arg(long)]
+        version: Option<String>,
     },
 }

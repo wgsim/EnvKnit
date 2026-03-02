@@ -10,15 +10,17 @@ pub mod run;
 pub mod status;
 pub mod store;
 pub mod tree;
+pub mod upgrade;
 pub mod why;
 
 use crate::cli::{Cli, Commands, EnvAction, StoreAction};
+
 use anyhow::Result;
 
 pub fn dispatch(cli: Cli) -> Result<()> {
     match cli.command {
         Commands::Init { env, backend } => init::run(env, backend),
-        Commands::Add { package, env, backend } => add::run(package, env, backend),
+        Commands::Add { package, env, backend, dev } => add::run(package, env, backend, dev),
         Commands::Remove { package, env } => remove::run(package, env),
         Commands::Lock { update, dry_run } => lock::run(update, dry_run),
         Commands::Install { env } => install::run(env),
@@ -36,5 +38,6 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             StoreAction::Stats => store::stats(),
             StoreAction::Cleanup { dry_run } => store::cleanup(dry_run),
         },
+        Commands::Upgrade { package, env, version } => upgrade::run(package, env, version),
     }
 }

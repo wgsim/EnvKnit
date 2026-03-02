@@ -41,6 +41,8 @@ impl<'de> serde::Deserialize<'de> for PackageSpec {
 pub struct EnvironmentConfig {
     #[serde(default)]
     pub packages: Vec<PackageSpec>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dev_packages: Vec<PackageSpec>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backend: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -162,6 +164,7 @@ mod tests {
         let mut envs = HashMap::new();
         envs.insert("default".to_string(), EnvironmentConfig {
             packages: vec![PackageSpec { name: "click".to_string(), version: Some(">=8.0".to_string()), extras: vec![] }],
+            dev_packages: vec![],
             backend: None,
             python_version: None,
         });
