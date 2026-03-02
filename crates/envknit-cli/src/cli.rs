@@ -6,6 +6,22 @@ pub enum EnvAction {
     List,
 }
 
+#[derive(Subcommand)]
+pub enum StoreAction {
+    /// List installed packages
+    List {
+        #[arg(long)]
+        package: Option<String>,
+    },
+    /// Show store disk usage statistics
+    Stats,
+    /// Remove packages not referenced by current lock file
+    Cleanup {
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
 #[derive(Parser)]
 #[command(
     name = "envknit",
@@ -66,6 +82,15 @@ pub enum Commands {
         #[arg(long, default_value = "3")]
         depth: usize,
     },
+    /// Show dependency graph from lock file
+    Graph {
+        #[arg(long)]
+        env: Option<String>,
+        #[arg(long)]
+        json: bool,
+        #[arg(long, default_value = "0")]
+        depth: usize,
+    },
     /// Show why a package is installed
     Why {
         package: String,
@@ -91,5 +116,10 @@ pub enum Commands {
         /// Command and arguments (everything after --)
         #[arg(last = true)]
         command: Vec<String>,
+    },
+    /// Manage the package store
+    Store {
+        #[command(subcommand)]
+        action: StoreAction,
     },
 }
