@@ -37,19 +37,46 @@ pub fn run(update: Option<String>, dry_run: bool) -> Result<()> {
         } else {
             env_config.packages.clone()
         };
+        let dev_specs: Vec<_> = if let Some(ref pkg) = update {
+            env_config
+                .dev_packages
+                .iter()
+                .filter(|p| p.name.eq_ignore_ascii_case(pkg))
+                .cloned()
+                .collect()
+        } else {
+            env_config.dev_packages.clone()
+        };
 
-        if specs.is_empty() {
+        if specs.is_empty() && dev_specs.is_empty() {
             println!("    (no matching packages)");
             continue;
         }
 
         let resolver = Resolver::new(dry_run);
-        let resolved = resolver.resolve(&specs)?;
 
-        for pkg in &resolved {
-            println!("    {} {} {}", "✓".green(), pkg.name.bold(), pkg.version);
+        let mut resolved = if !specs.is_empty() {
+            resolver.resolve(&specs)?
+        } else {
+            vec![]
+        };
+
+        let mut dev_resolved = if !dev_specs.is_empty() {
+            let mut dr = resolver.resolve(&dev_specs)?;
+            for pkg in &mut dr {
+                pkg.dev = true;
+            }
+            dr
+        } else {
+            vec![]
+        };
+
+        for pkg in resolved.iter().chain(dev_resolved.iter()) {
+            let tag = if pkg.dev { " [dev]".dimmed() } else { "".normal() };
+            println!("    {} {} {}{}", "✓".green(), pkg.name.bold(), pkg.version, tag);
         }
 
+        resolved.append(&mut dev_resolved);
         env_packages.insert(env_name.clone(), resolved);
     }
 

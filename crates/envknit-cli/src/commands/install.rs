@@ -3,16 +3,17 @@ use anyhow::{Context, Result};
 use colored::Colorize;
 use std::path::Path;
 
-pub fn run(env: Option<String>) -> Result<()> {
+pub fn run(env: Option<String>, no_dev: bool) -> Result<()> {
     let lock_path = LockFile::find(Path::new("."))
         .context("No envknit.lock.yaml found. Run `envknit lock` first.")?;
     let mut lock = LockFile::load(&lock_path)?;
 
     let env_display = env.as_deref().unwrap_or("all");
     println!(
-        "{} Installing packages for environment: {}",
+        "{} Installing packages for environment: {}{}",
         "→".cyan(),
-        env_display.bold()
+        env_display.bold(),
+        if no_dev { " (no dev)" } else { "" }
     );
 
     let envs_to_install: Vec<String> = if let Some(ref e) = env {
@@ -23,16 +24,20 @@ pub fn run(env: Option<String>) -> Result<()> {
 
     if envs_to_install.is_empty() {
         // Fall back to top-level packages list
-        install_packages(&mut lock.packages, "default")?;
+        let pkgs: Vec<_> = lock.packages.iter_mut()
+            .filter(|p| !no_dev || !p.dev)
+            .collect();
+        // SAFETY: we own the vec and the iterator borrows mutably
+        install_packages_mut(pkgs, "default")?;
     } else {
         for env_name in &envs_to_install {
             println!("  Environment: {}", env_name.bold());
-            let pkgs = lock
+            let pkgs: Vec<_> = lock
                 .environments
                 .get_mut(env_name)
-                .map(|v| v.as_mut_slice())
-                .unwrap_or(&mut []);
-            install_packages(pkgs, env_name)?;
+                .map(|v| v.iter_mut().filter(|p| !no_dev || !p.dev).collect())
+                .unwrap_or_default();
+            install_packages_mut(pkgs, env_name)?;
         }
     }
 
@@ -41,14 +46,14 @@ pub fn run(env: Option<String>) -> Result<()> {
     Ok(())
 }
 
-fn install_packages(packages: &mut [crate::lockfile::LockedPackage], env_name: &str) -> Result<()> {
+fn install_packages_mut(packages: Vec<&mut crate::lockfile::LockedPackage>, env_name: &str) -> Result<()> {
     let store_base = dirs_next::home_dir()
         .context("Cannot determine home directory")?
         .join(".envknit")
         .join("packages");
     std::fs::create_dir_all(&store_base)?;
 
-    for pkg in packages.iter_mut() {
+    for pkg in packages.into_iter() {
         if pkg.install_path.is_some() {
             println!(
                 "    {} {}=={} (cached)",

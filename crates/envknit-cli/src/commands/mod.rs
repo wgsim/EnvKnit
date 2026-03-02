@@ -24,7 +24,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         Commands::Add { package, env, backend, dev } => add::run(package, env, backend, dev),
         Commands::Remove { package, env } => remove::run(package, env),
         Commands::Lock { update, dry_run } => lock::run(update, dry_run),
-        Commands::Install { env } => install::run(env),
+        Commands::Install { env, no_dev } => install::run(env, no_dev),
         Commands::Status { env } => status::run(env),
         Commands::Tree { env, depth } => tree::run(env, depth),
         Commands::Graph { env, json, depth } => graph::run(env, json, depth),

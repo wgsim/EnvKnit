@@ -1,9 +1,13 @@
 """
 Command-line interface module.
 
-Provides the CLI application and commands for envknit.
+The Python CLI is deprecated. Use the Rust CLI instead.
+See: https://github.com/wgsim/EnvKnit#installation
 """
 
-from envknit.cli.main import app
+from envknit.cli.main import main
 
-__all__ = ["app"]
+# Backward-compat alias for any code that imported `app`
+app = main
+
+__all__ = ["app", "main"]

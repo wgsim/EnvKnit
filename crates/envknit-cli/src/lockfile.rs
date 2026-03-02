@@ -16,6 +16,9 @@ pub struct LockedPackage {
     pub backend: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dependencies: Vec<String>,
+    /// True if this package belongs to the dev_packages list.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub dev: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -99,7 +102,7 @@ mod tests {
     }
 
     fn pkg(name: &str, version: &str) -> LockedPackage {
-        LockedPackage { name: name.to_string(), version: version.to_string(), install_path: None, backend: None, dependencies: vec![] }
+        LockedPackage { name: name.to_string(), version: version.to_string(), install_path: None, backend: None, dependencies: vec![], dev: false }
     }
 
     #[test]

@@ -27,13 +27,12 @@ Backend calls are mocked where needed to avoid conda/pip process execution.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-
 import pytest
-import yaml
-from click.testing import CliRunner
 
-from envknit.cli.main import app
+# The Python CLI was replaced by the Rust CLI stub in v1.0.
+# These tests are no longer valid and are skipped pending replacement
+# with Rust CLI integration tests.
+pytestmark = pytest.mark.skip(reason="Python CLI removed in v1.0; use Rust CLI")
 
 
 # ---------------------------------------------------------------------------

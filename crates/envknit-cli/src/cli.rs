@@ -72,6 +72,9 @@ pub enum Commands {
     Install {
         #[arg(long)]
         env: Option<String>,
+        /// Skip dev dependencies
+        #[arg(long)]
+        no_dev: bool,
     },
     /// Show status of installed environments
     Status {

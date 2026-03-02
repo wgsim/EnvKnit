@@ -88,6 +88,7 @@ impl Resolver {
                     install_path: None,
                     backend: None,
                     dependencies: dep_names,
+                    dev: false,
                 },
             );
         }
