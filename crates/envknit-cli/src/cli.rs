@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use clap_complete::Shell;
 
 #[derive(Subcommand)]
 pub enum EnvAction {
@@ -99,6 +100,11 @@ pub enum Commands {
     },
     /// Diagnose environment (pip, python, pyenv, mise, config, lock file)
     Doctor,
+    /// Generate shell completion script
+    Completions {
+        /// Shell to generate completions for
+        shell: Shell,
+    },
     /// Verify config and lock file are in sync (useful in CI)
     Check,
     /// Verify integrity of installed packages using recorded SHA-256 hashes

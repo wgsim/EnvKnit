@@ -1,5 +1,6 @@
 pub mod add;
 pub mod check;
+pub mod completions;
 pub mod diff;
 pub mod doctor;
 pub mod env_create;
@@ -34,6 +35,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         Commands::Lock { update, dry_run, env } => lock::run(update, dry_run, env),
         Commands::Install { env, no_dev, auto_cleanup } => install::run(env, no_dev, auto_cleanup),
         Commands::Doctor => doctor::run(),
+        Commands::Completions { shell } => completions::run(shell),
         Commands::Check => check::run(),
         Commands::Verify { env } => verify::run(env),
         Commands::Diff { base, head, env } => diff::run(base, head, env),

@@ -1,81 +1,70 @@
 # EnvKnit
 
-**Multi-version Python package isolation** — run two versions of the same library in the same project, side by side.
+**Multi-version Python package manager** — isolate environments, lock dependencies, and run multiple package versions side by side.
 
-```python
-import envknit
-
-envknit.configure_from_lock("envknit.lock.yaml")
-
-with envknit.use("requests", "2.28.0"):
-    import requests          # 2.28.0
-    r = requests.get(url)
-
-with envknit.use("requests", "2.31.0"):
-    import requests          # 2.31.0
-    r = requests.get(url)
+```bash
+envknit init
+envknit add "numpy>=1.24" --env ml
+envknit add pytest --dev
+envknit lock
+envknit install
+envknit run --env ml -- python train.py
 ```
 
-## What is EnvKnit?
-
-Python projects frequently hit a wall when two dependencies require conflicting versions of a shared package. EnvKnit solves this by letting you install and import multiple versions of the same package within a single Python process — without virtual environment switching or subprocess overhead for pure-Python packages.
-
-At its core, EnvKnit intercepts `import` statements via `sys.meta_path` and routes each import to the correct versioned install directory. Isolation is maintained per async task and thread using `ContextVar`, so concurrent code using different versions of the same library works correctly without any locking or coordination overhead.
-
-For packages containing C extensions (numpy, scipy, pandas, etc.), in-process multi-version loading is fundamentally impossible due to Python's native module loader. EnvKnit detects these automatically and provides a subprocess worker API (`worker()`) that handles the isolation transparently, transferring large arrays via shared memory.
+---
 
 ## Architecture
 
-| Component | Role | Distribution |
-|-----------|------|--------------|
-| **`envknit-cli`** | Resolves, installs, and locks packages | Standalone binary (no Python required) |
-| **`envknit` library** | Routes `import` statements to versioned install paths at runtime | `pip install envknit` |
+| Component | Role |
+|-----------|------|
+| **`envknit-cli`** | Standalone Rust binary — resolves, locks, installs packages |
+| **`envknit` library** | Python runtime — routes `import` to versioned install paths |
 
-The two components communicate only through `envknit.lock.yaml`. The CLI never lives inside the environment it manages; the library never installs anything.
+Both components communicate only through `envknit.lock.yaml`. The CLI never lives inside the environment it manages.
 
 ```
-envknit-cli (standalone binary)        envknit library (pip install)
-───────────────────────────────        ──────────────────────────────
-envknit init/add/lock/install   ──▶   envknit.lock.yaml
-  conda / pip / poetry backend         │
-  PubGrub dependency resolver          ▼
-  ~/.envknit/packages/<n>/<v>/  ──▶   configure_from_lock()
-                                          │
-                                          ├── use()         ─▶ VersionedFinder
-                                          │   (pure-Python)    sys.meta_path hook
-                                          │                    ContextVar isolation
-                                          │
-                                          └── worker()      ─▶ ProcessPool
-                                              (C extensions)   shared memory IPC
+envknit-cli                         envknit library
+───────────                         ───────────────
+init / add / lock / install  ──▶   envknit.lock.yaml
+~/.envknit/packages/<n>/<v>/ ──▶   configure_from_lock()
+                                    use("requests", "2.28.0")
+                                    worker("numpy", "1.26.4")
 ```
+
+---
 
 ## Installation
 
-### CLI (environment management)
+### CLI
 
 Download the standalone binary from the [Releases page](https://github.com/wgsim/EnvKnit/releases):
 
 ```bash
-# Linux / macOS
+# Linux
 curl -L https://github.com/wgsim/EnvKnit/releases/latest/download/envknit-linux-amd64 -o envknit
-chmod +x envknit
-sudo mv envknit /usr/local/bin/
+chmod +x envknit && sudo mv envknit /usr/local/bin/
 
-# macOS (arm64)
+# macOS (Apple Silicon)
 curl -L https://github.com/wgsim/EnvKnit/releases/latest/download/envknit-macos-arm64 -o envknit
-chmod +x envknit
-sudo mv envknit /usr/local/bin/
+chmod +x envknit && sudo mv envknit /usr/local/bin/
 
 # Windows — download envknit-windows-amd64.exe from the Releases page
 ```
 
-Verify:
+**Shell completion** (add to your shell's rc file):
 
 ```bash
-envknit --version
+# bash
+eval "$(envknit completions bash)"
+
+# zsh
+eval "$(envknit completions zsh)"
+
+# fish
+envknit completions fish | source
 ```
 
-### Library (runtime import isolation)
+### Library
 
 ```bash
 pip install envknit
@@ -87,285 +76,194 @@ Requirements: Python 3.10+
 
 ## Quick Start
 
-### 1. Initialize a project
-
 ```bash
-envknit init                          # conda backend (default)
-envknit init --backend pip            # pip backend
-envknit init --name myproject -p 3.11 --backend pip
-```
+# 1. Initialize
+envknit init                        # creates envknit.yaml
 
-Creates `envknit.yaml` in the current directory.
-
-```bash
-envknit add "numpy>=1.24,<2.0"
-envknit add scipy
+# 2. Add packages
+envknit add "requests>=2.28"
+envknit add "numpy>=1.24,<2.0" --env ml
 envknit add pytest --dev
-envknit add torch --env gpu           # add to a named environment
+
+# 3. Lock
+envknit lock                        # creates envknit.lock.yaml
+
+# 4. Install
+envknit install                     # installs to ~/.envknit/packages/
+
+# 5. Run
+envknit run -- python app.py
+envknit run --env ml -- python train.py
 ```
-
-### 2. Resolve and lock
-
-```bash
-envknit lock
-```
-
-Produces `envknit.lock.yaml`:
-
-```yaml
-schema_version: "1.0"
-lock_generated_at: "2026-02-27T00:00:00+00:00"
-resolver_version: "envknit-0.1.0"
-
-environments:
-  default:
-    - name: numpy
-      version: 1.26.4
-      install_path: /home/user/.envknit/packages/numpy/1.26.4
-      hash: sha256:abc123...
-    - name: scipy
-      version: 1.13.0
-      install_path: /home/user/.envknit/packages/scipy/1.13.0
-      hash: sha256:def456...
-```
-
-### 3. Install
-
-```bash
-envknit install
-```
-
-### 4. Use in Python
-
-```python
-import envknit
-
-# Load all environments from the lock file
-envknit.configure_from_lock("envknit.lock.yaml")
-
-# Pure-Python packages: in-process isolation
-with envknit.use("requests", "2.28.0"):
-    import requests
-    print(requests.__version__)   # 2.28.0
-
-with envknit.use("requests", "2.31.0"):
-    import requests
-    print(requests.__version__)   # 2.31.0
-
-# C extension packages: subprocess worker
-async with envknit.worker("numpy", "1.26.4") as np_old:
-    result = await np_old.zeros(1000)
-
-async with envknit.worker("numpy", "2.0.0") as np_new:
-    result = await np_new.zeros(1000)
-```
-
----
-
-## Python API Reference
-
-### `configure_from_lock(path, env=None, auto_install=True)`
-
-Loads `envknit.lock.yaml`, registers all versioned install paths, and auto-installs the import hook.
-
-```python
-# Load all environments
-count = envknit.configure_from_lock("envknit.lock.yaml")
-
-# Load one environment only
-count = envknit.configure_from_lock("envknit.lock.yaml", env="ml")
-
-# Skip auto-installing the import hook
-count = envknit.configure_from_lock("envknit.lock.yaml", auto_install=False)
-```
-
-Returns the number of packages registered. Raises `SchemaVersionError` if the lock file schema is from a future incompatible major version.
-
-### `use(name, version)`
-
-Context manager for in-process version isolation. Safe for concurrent `asyncio.Task`s and threads via `ContextVar`.
-
-```python
-with envknit.use("requests", "2.28.0"):
-    import requests           # 2.28.0 within this block
-
-with envknit.use("requests", "2.31.0"):
-    import requests           # 2.31.0 within this block
-```
-
-Raises `CExtensionError` if the package contains `.so`/`.pyd` files — use `worker()` instead.
-
-### `worker(name, version, install_path=None)`
-
-Async context manager for C extension packages. Runs the package in an isolated subprocess; large arrays transfer via `multiprocessing.shared_memory` (zero-copy on Linux).
-
-```python
-async with envknit.worker("numpy", "1.26.4") as np:
-    result = await np.zeros(1000)
-```
-
-### `import_version(name, version)`
-
-Import a specific version directly and return the module object.
-
-```python
-requests_old = envknit.import_version("requests", "2.28.0")
-requests_new = envknit.import_version("requests", "2.31.0")
-```
-
-### `set_default(name, version)`
-
-Set a default version for all subsequent bare `import` statements without a context manager.
-
-```python
-envknit.set_default("requests", "2.31.0")
-import requests   # always 2.31.0
-```
-
-### `VersionContext`
-
-The class backing `use()`. Manages per-context module caches via `ContextVar`. You rarely need to instantiate this directly.
-
-### `enable()` / `disable()`
-
-Manually install or uninstall the `sys.meta_path` hook. `configure_from_lock()` calls `enable()` automatically unless `auto_install=False`.
 
 ---
 
 ## CLI Reference
 
+### Package management
+
 | Command | Description |
 |---------|-------------|
-| `init` | Create `envknit.yaml` for the current project |
-| `add <pkg>` | Add a package (supports version constraints, `--env`, `--dev`) |
-| `remove <pkg>` | Remove a package from the configuration |
-| `lock` | Resolve dependencies and write `envknit.lock.yaml` |
-| `install` | Install all packages from the lock file |
-| `status` | Show project, backend, and lock file summary |
-| `tree` | Display dependency tree (`--depth`, `--env`) |
-| `why <pkg>` | Explain why a package is present |
-| `export` | Export as `requirements.txt`, `environment.yml`, or JSON |
-| `run <cmd>` | Run a command inside a managed environment |
-| `env list/create/remove` | Manage named environments |
-| `store list/stats/cleanup` | Inspect and manage the central package store |
+| `init [--env NAME] [--backend pip]` | Create `envknit.yaml` |
+| `add <pkg> [--env NAME] [--dev]` | Add a package (supports `>=`, `==`, `~=` constraints) |
+| `remove <pkg> [--env NAME] [--dev]` | Remove a package |
+| `upgrade [pkg] [--env NAME] [--version VER]` | Remove `==` pins; re-lock to latest |
+| `pin [pkg] [--env NAME]` | Pin config to exact versions from lock file |
+
+### Resolution & installation
+
+| Command | Description |
+|---------|-------------|
+| `lock [--env NAME] [--update PKG] [--dry-run]` | Resolve and write `envknit.lock.yaml` |
+| `install [--env NAME] [--no-dev] [--auto-cleanup]` | Install packages from lock file |
+| `verify [--env NAME]` | Verify installed package integrity (SHA-256) |
+
+### Inspection
+
+| Command | Description |
+|---------|-------------|
+| `status [--env NAME]` | Show environments and install status |
+| `tree [--env NAME] [--depth N]` | Dependency tree |
+| `graph [--env NAME] [--json]` | Dependency graph |
+| `why <pkg> [--env NAME]` | Why is a package installed? |
+| `check` | Verify config and lock file are in sync (CI-friendly) |
+| `diff <base> <head> [--env NAME]` | Compare two lock files |
+
+### Environments
+
+| Command | Description |
+|---------|-------------|
+| `env list` | List all environments |
+| `env create <name> [--backend pip]` | Add a new environment |
+| `env remove <name>` | Remove an environment |
+
+### Export & publish
+
+| Command | Description |
+|---------|-------------|
+| `export [--format requirements\|json] [--no-dev] [--output FILE]` | Export lock as requirements.txt or JSON |
+| `publish [--repository pypi] [--dry-run]` | Build and upload to PyPI (wraps `build` + `twine`) |
+
+### Store management
+
+| Command | Description |
+|---------|-------------|
+| `store list [--package NAME]` | List installed packages in `~/.envknit/packages/` |
+| `store stats` | Disk usage summary |
+| `store cleanup [--dry-run]` | Remove versions not referenced by current lock file |
+
+### Utilities
+
+| Command | Description |
+|---------|-------------|
+| `run [--env NAME] [--no-dev] -- <cmd>` | Run a command with env's PYTHONPATH set |
+| `doctor` | Diagnose installation (pip, python, pyenv, mise, config, lock) |
+| `init-shell [--shell bash\|zsh\|fish]` | Print shell integration snippet |
+| `completions <bash\|zsh\|fish\|powershell>` | Generate shell completion script |
 
 ---
 
-## Configuration Reference
+## Configuration
 
 ### `envknit.yaml`
 
 ```yaml
-name: my-project
-version: 1.0.0
-
 environments:
   default:
-    python: "3.11"
+    python_version: "3.11"
     packages:
       - requests>=2.28.0
-      - urllib3>=2.0.0
+      - click>=8.0
+    dev_packages:
+      - pytest>=7.0
 
   ml:
-    python: "3.11"
+    python_version: "3.11"
+    backend: pip
     packages:
-      - torch>=2.0.0
-      - numpy>=1.26.0
-
-backends:
-  pip:
-    type: pip
-  conda:
-    type: conda
-    channels:
-      - conda-forge
-      - defaults
+      - torch>=2.0
+      - numpy>=1.24,<2.0
 ```
 
 ### `envknit.lock.yaml`
 
-Auto-generated by `envknit lock`. Commit this file to version-control.
+Auto-generated by `envknit lock`. **Commit this file to version control.**
 
 ```yaml
 schema_version: "1.0"
-lock_generated_at: "2026-02-27T00:00:00+00:00"
-resolver_version: "envknit-0.1.0"
+lock_generated_at: "2026-03-02T00:00:00+00:00"
+resolver_version: "0.1.0"
 
 environments:
   default:
     - name: requests
       version: 2.31.0
       install_path: /home/user/.envknit/packages/requests/2.31.0
-      hash: sha256:...
+      sha256: a1b2c3...
+      dependencies:
+        - urllib3>=1.21.1,<3
+        - certifi>=2017.4.17
     - name: urllib3
       version: 2.1.0
       install_path: /home/user/.envknit/packages/urllib3/2.1.0
-      hash: sha256:...
+      sha256: d4e5f6...
 ```
-
-`install_path` is the directory used by the library at import time. Do not edit this file manually.
 
 ---
 
-## C Extension Packages
-
-Packages like numpy, scipy, and pandas embed compiled `.so`/`.pyd` files. Python's native module loader does not support loading the same extension in two versions within a single process.
-
-`use()` detects this automatically and raises `CExtensionError`:
+## Python API
 
 ```python
-try:
-    with envknit.use("numpy", "1.26.4"):
-        import numpy
-except envknit.CExtensionError as e:
-    print(e)
-    # 'numpy' contains C extensions — use the subprocess worker instead:
-    #   async with envknit.worker('numpy', '1.26.4') as numpy: ...
-```
+import envknit
 
-Use `worker()` for these packages:
+# Load environments from lock file
+envknit.configure_from_lock("envknit.lock.yaml")
 
-```python
+# In-process version isolation (pure-Python packages)
+with envknit.use("requests", "2.28.0"):
+    import requests          # 2.28.0
+
+with envknit.use("requests", "2.31.0"):
+    import requests          # 2.31.0
+
+# Subprocess isolation (C extension packages)
 async with envknit.worker("numpy", "1.26.4") as np_old:
-    arr = await np_old.array([1, 2, 3])
+    arr = await np_old.zeros(1000)
 
 async with envknit.worker("numpy", "2.0.0") as np_new:
-    arr = await np_new.array([1, 2, 3])
+    arr = await np_new.zeros(1000)
 ```
 
-Each `worker()` block spawns a dedicated subprocess with its own `sys.path`. Large array data moves between processes via `multiprocessing.shared_memory` with zero copy on Linux.
+### API reference
+
+| Function | Description |
+|----------|-------------|
+| `configure_from_lock(path, env=None)` | Load lock file, register install paths, enable import hook |
+| `use(name, version)` | Context manager for in-process version isolation |
+| `worker(name, version)` | Async context manager for C extension subprocess isolation |
+| `import_version(name, version)` | Import a specific version and return the module |
+| `set_default(name, version)` | Set default version for bare `import` statements |
+| `enable()` / `disable()` | Install / uninstall the `sys.meta_path` hook |
 
 ---
 
-## Security Scanning
+## CI Integration
 
-```python
-from envknit.security.scanner import VulnerabilityScanner
+```yaml
+# GitHub Actions example
+- name: Check dependencies in sync
+  run: envknit check          # exits 1 if config and lock diverge
 
-scanner = VulnerabilityScanner()
-
-# Scan a single package
-result = scanner.scan_package("requests", "2.25.0")
-for vuln in result.vulnerabilities:
-    print(f"{vuln.id}: {vuln.description} (severity: {vuln.severity})")
-
-# Scan all packages in a lock file
-packages = [("requests", "2.25.0"), ("numpy", "1.23.0")]
-results = scanner.scan_all(packages)
-
-# Check for security-relevant updates
-recommendations = scanner.check_updates(packages)
+- name: Verify package integrity
+  run: envknit verify         # exits 1 if SHA-256 mismatches
 ```
-
-Uses `pip-audit` when available, falls back to the [OSV API](https://api.osv.dev) directly. Results are cached with a SHA-256 key and 1-hour TTL.
 
 ---
 
 ## Known Limitations
 
-- **C extensions**: In-process multi-version loading is permanently impossible. `worker()` is the only viable path.
-- **Category B `sys.modules` issues**: Packages that write to global registries (e.g., `logging`, `warnings`) or retain references across context boundaries are not fully isolated by `use()`. Use `worker()` for affected packages.
-- **`lock` and `install` commands**: Currently require the Python CLI (`pip install envknit[cli]`) for conda and poetry backends; the standalone binary delegates these operations to the detected backend tool.
+- **C extensions**: In-process multi-version loading is impossible. Use `worker()`.
+- **Global state packages**: Packages that write to global registries (`logging`, `warnings`) are not fully isolated by `use()`. Use `worker()`.
 
 ---
 
@@ -374,14 +272,17 @@ Uses `pip-audit` when available, falls back to the [OSV API](https://api.osv.dev
 ```bash
 git clone https://github.com/wgsim/EnvKnit.git
 cd EnvKnit
-pip install -e ".[dev,cli]"
+
+# Rust CLI
+cargo test
+
+# Python library
+pip install -e ".[dev]"
 pytest
 ```
 
-Test coverage targets: resolver 87%, lock 82%, import_hook 67%, security 84–97%.
-
-Pull requests and issues are welcome.
+---
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT
