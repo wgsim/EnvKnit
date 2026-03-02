@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::lockfile::LockFile;
+use crate::python_resolver;
 use anyhow::Result;
 use colored::Colorize;
 use std::path::Path;
@@ -156,6 +157,24 @@ pub fn run() -> Result<()> {
             ));
         }
         _ => checks.push(Check::ok("PYTHONPATH", "not set (clean)")),
+    }
+
+    // --- python_version per environment ---
+    if let Some(p) = Config::find(Path::new(".")).and_then(|p| Config::load(&p).ok()) {
+        for (env_name, env_cfg) in &p.environments {
+            if let Some(ref ver) = env_cfg.python_version {
+                match python_resolver::resolve_python(ver) {
+                    Ok(path) => checks.push(Check::ok(
+                        "python_version",
+                        format!("[{}] {} → {}", env_name, ver, path.display()),
+                    )),
+                    Err(e) => checks.push(Check::fail(
+                        "python_version",
+                        format!("[{}] {} not found: {}", env_name, ver, e),
+                    )),
+                }
+            }
+        }
     }
 
     // --- git (optional) ---

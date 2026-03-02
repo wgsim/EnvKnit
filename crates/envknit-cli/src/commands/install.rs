@@ -1,4 +1,6 @@
+use crate::config::Config;
 use crate::lockfile::{LockedPackage, LockFile};
+use crate::python_resolver;
 use anyhow::{Context, Result};
 use colored::Colorize;
 use rayon::prelude::*;
@@ -9,6 +11,9 @@ pub fn run(env: Option<String>, no_dev: bool, auto_cleanup: bool) -> Result<()> 
     let lock_path = LockFile::find(Path::new("."))
         .context("No envknit.lock.yaml found. Run `envknit lock` first.")?;
     let mut lock = LockFile::load(&lock_path)?;
+
+    // Load config to resolve python_version per environment (best-effort)
+    let config = Config::find(Path::new(".")).and_then(|p| Config::load(&p).ok());
 
     let env_display = env.as_deref().unwrap_or("all");
     println!(
@@ -28,16 +33,20 @@ pub fn run(env: Option<String>, no_dev: bool, auto_cleanup: bool) -> Result<()> 
         let pkgs: Vec<_> = lock.packages.iter_mut()
             .filter(|p| !no_dev || !p.dev)
             .collect();
-        install_packages_mut(pkgs, "default")?;
+        install_packages_mut(pkgs, "default", default_pip())?;
     } else {
         for env_name in &envs_to_install {
             println!("  Environment: {}", env_name.bold());
+
+            // Resolve pip command for this environment's python_version
+            let pip_cmd = resolve_pip_for_env(env_name, &config);
+
             let pkgs: Vec<_> = lock
                 .environments
                 .get_mut(env_name)
                 .map(|v| v.iter_mut().filter(|p| !no_dev || !p.dev).collect())
                 .unwrap_or_default();
-            install_packages_mut(pkgs, env_name)?;
+            install_packages_mut(pkgs, env_name, pip_cmd)?;
         }
     }
 
@@ -52,10 +61,43 @@ pub fn run(env: Option<String>, no_dev: bool, auto_cleanup: bool) -> Result<()> 
     Ok(())
 }
 
+fn default_pip() -> Vec<String> {
+    vec!["pip".to_string()]
+}
+
+fn resolve_pip_for_env(env_name: &str, config: &Option<Config>) -> Vec<String> {
+    let python_version = config
+        .as_ref()
+        .and_then(|c| c.environments.get(env_name))
+        .and_then(|e| e.python_version.as_deref());
+
+    if let Some(ver) = python_version {
+        match python_resolver::resolve_python(ver) {
+            Ok(python_path) => {
+                let args = python_resolver::pip_args(&python_path);
+                println!(
+                    "  {} Using Python {} for env '{}'",
+                    "→".cyan(),
+                    ver,
+                    env_name
+                );
+                return args;
+            }
+            Err(e) => {
+                eprintln!(
+                    "  {} Could not resolve Python {}: {} — falling back to system pip",
+                    "!".yellow(), ver, e
+                );
+            }
+        }
+    }
+    default_pip()
+}
+
 /// Install a batch of packages, running new installs in parallel via rayon.
 /// Already-cached packages are identified first (sequential), then new packages
 /// are installed concurrently.
-fn install_packages_mut(mut packages: Vec<&mut LockedPackage>, _env_name: &str) -> Result<()> {
+fn install_packages_mut(mut packages: Vec<&mut LockedPackage>, _env_name: &str, pip_cmd: Vec<String>) -> Result<()> {
     let store_base = dirs_next::home_dir()
         .context("Cannot determine home directory")?
         .join(".envknit")
@@ -91,7 +133,11 @@ fn install_packages_mut(mut packages: Vec<&mut LockedPackage>, _env_name: &str) 
             }
 
             let spec = format!("{}=={}", name, version);
-            let output = std::process::Command::new("pip")
+            let (prog, base_args) = pip_cmd.split_first()
+                .map(|(p, a)| (p.as_str(), a))
+                .unwrap_or(("pip", &[]));
+            let output = std::process::Command::new(prog)
+                .args(base_args)
                 .args(["install", "--target", &install_dir.to_string_lossy(), &spec, "--quiet"])
                 .output();
 

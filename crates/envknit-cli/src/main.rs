@@ -4,6 +4,7 @@ mod commands;
 mod config;
 mod error;
 mod lockfile;
+mod python_resolver;
 mod resolver;
 
 /// Shared mutex for tests that mutate the process working directory.

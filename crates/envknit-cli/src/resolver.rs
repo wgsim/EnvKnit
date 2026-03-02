@@ -36,22 +36,64 @@ impl Resolver {
         Resolver { dry_run }
     }
 
+    /// Resolve a set of package specs into a consistent locked set.
+    ///
+    /// Uses backtracking: if the greedy first choice for a package causes a
+    /// conflict with a later constraint, the resolver backs up and tries the
+    /// next available version — up to `MAX_BACKTRACKS` attempts.
     pub fn resolve(&self, packages: &[PackageSpec]) -> Result<Vec<LockedPackage>> {
-        let mut resolved: IndexMap<String, LockedPackage> = IndexMap::new();
-        let mut queue: Vec<(PackageSpec, usize)> = packages.iter().map(|p| (p.clone(), 0)).collect();
-        let mut visited: HashSet<String> = HashSet::new();
+        let mut state = ResolveState::new();
 
-        while let Some((spec, depth)) = queue.pop() {
+        // Seed the work queue with the direct specs
+        for spec in packages {
+            state.add_constraint(normalize_name(&spec.name), spec.version.clone());
+            if !state.pending.iter().any(|s| normalize_name(&s.name) == normalize_name(&spec.name)) {
+                state.pending.push(spec.clone());
+            }
+        }
+
+        const MAX_BACKTRACKS: usize = 50;
+        let mut backtracks = 0;
+
+        while let Some(spec) = state.pending.pop() {
             let name_key = normalize_name(&spec.name);
-            if visited.contains(&name_key) {
+
+            // Already resolved — verify the chosen version satisfies this new constraint
+            if let Some(locked) = state.resolved.get(&name_key) {
+                let constraint = spec.version.as_deref().unwrap_or("");
+                if !constraint.is_empty() && !Self::version_matches(&locked.version, constraint) {
+                    // Conflict: try backtracking
+                    if backtracks >= MAX_BACKTRACKS {
+                        anyhow::bail!(
+                            "Dependency conflict: '{}' is locked at {} but '{}' requires it",
+                            spec.name, locked.version, constraint
+                        );
+                    }
+                    backtracks += 1;
+
+                    // Remove the conflicting package and bump its version index
+                    state.resolved.remove(&name_key);
+                    let idx = state.version_index.entry(name_key.clone()).or_insert(0);
+                    *idx += 1;
+
+                    // Re-add the spec to retry with the next version
+                    state.pending.push(spec.clone());
+                    // Also invalidate packages that depended on it
+                    let dependents: Vec<PackageSpec> = state.dependents_of(&name_key);
+                    for dep in dependents {
+                        let dep_key = normalize_name(&dep.name);
+                        state.resolved.remove(&dep_key);
+                        state.pending.push(dep);
+                    }
+                }
                 continue;
             }
-            visited.insert(name_key.clone());
 
+            // Fetch available versions (cached)
             let versions = match self.fetch_pypi_versions(&spec.name) {
                 Ok(v) => v,
                 Err(e) => {
-                    if depth > 0 {
+                    if state.is_transitive(&name_key) {
                         eprintln!("warning: skipping transitive dep '{}': {}", spec.name, e);
                         continue;
                     }
@@ -59,19 +101,25 @@ impl Resolver {
                 }
             };
 
-            let constraint = spec.version.as_deref().unwrap_or("");
-            let chosen = versions
+            // Merge all constraints for this package accumulated so far
+            let combined = state.constraints.get(&name_key).cloned().unwrap_or_default();
+            let start_idx = *state.version_index.get(&name_key).unwrap_or(&0);
+
+            let chosen_version = versions
                 .iter()
-                .find(|v| Self::version_matches(v, constraint))
+                .skip(start_idx)
+                .find(|v| combined.iter().all(|c| Self::version_matches(v, c)))
+                .cloned()
                 .with_context(|| {
                     format!(
-                        "No version of '{}' satisfies constraint '{}'",
-                        spec.name, constraint
+                        "No version of '{}' satisfies constraints: [{}]",
+                        spec.name,
+                        combined.iter().cloned().collect::<Vec<_>>().join(", ")
                     )
                 })?;
-            let chosen_version = chosen.clone();
 
-            // Fetch transitive deps (skip if depth limit reached or fetch fails)
+            // Fetch transitive deps
+            let depth = state.depth(&name_key);
             let dep_names: Vec<String> = if depth < 5 {
                 match self.fetch_pypi_info(&spec.name, &chosen_version) {
                     Ok(requires_dist) => {
@@ -84,18 +132,19 @@ impl Resolver {
                                     dep_spec.name,
                                     dep_spec.version.as_deref().unwrap_or("")
                                 ));
-                                if !visited.contains(&dep_key) {
-                                    queue.push((dep_spec, depth + 1));
+                                if let Some(ref c) = dep_spec.version {
+                                    state.add_constraint(dep_key.clone(), Some(c.clone()));
+                                }
+                                if !state.resolved.contains_key(&dep_key) {
+                                    state.pending.push(dep_spec.clone());
+                                    state.record_parent(&dep_key, &name_key);
                                 }
                             }
                         }
                         names
                     }
                     Err(e) => {
-                        eprintln!(
-                            "warning: could not fetch deps for '{}=={}: {}",
-                            spec.name, chosen_version, e
-                        );
+                        eprintln!("warning: could not fetch deps for '{}=={}: {}", spec.name, chosen_version, e);
                         vec![]
                     }
                 }
@@ -103,8 +152,8 @@ impl Resolver {
                 vec![]
             };
 
-            resolved.insert(
-                name_key,
+            state.resolved.insert(
+                name_key.clone(),
                 LockedPackage {
                     name: spec.name.clone(),
                     version: chosen_version,
@@ -117,7 +166,7 @@ impl Resolver {
             );
         }
 
-        Ok(resolved.into_values().collect())
+        Ok(state.resolved.into_values().collect())
     }
 
     /// Fetch `requires_dist` list for a specific package version from PyPI.
@@ -311,6 +360,79 @@ impl Resolver {
             }
         }
         std::cmp::Ordering::Equal
+    }
+}
+
+/// Backtracking resolver state.
+struct ResolveState {
+    /// Successfully resolved packages (name_key → LockedPackage)
+    resolved: IndexMap<String, LockedPackage>,
+    /// Work queue of specs yet to be resolved
+    pending: Vec<crate::config::PackageSpec>,
+    /// All constraints seen for each package (name_key → [constraint_strings])
+    constraints: std::collections::HashMap<String, Vec<String>>,
+    /// How many versions to skip for a given package (backtrack counter)
+    version_index: std::collections::HashMap<String, usize>,
+    /// Which package introduced each transitive dep (child → parent name_key)
+    parents: std::collections::HashMap<String, String>,
+    /// Packages that were resolved transitively (not from direct specs)
+    transitive: HashSet<String>,
+}
+
+impl ResolveState {
+    fn new() -> Self {
+        ResolveState {
+            resolved: IndexMap::new(),
+            pending: Vec::new(),
+            constraints: std::collections::HashMap::new(),
+            version_index: std::collections::HashMap::new(),
+            parents: std::collections::HashMap::new(),
+            transitive: HashSet::new(),
+        }
+    }
+
+    fn add_constraint(&mut self, name_key: String, version: Option<String>) {
+        if let Some(c) = version {
+            let entry = self.constraints.entry(name_key).or_default();
+            if !entry.contains(&c) {
+                entry.push(c);
+            }
+        }
+    }
+
+    fn record_parent(&mut self, child: &str, parent: &str) {
+        self.parents.insert(child.to_string(), parent.to_string());
+        self.transitive.insert(child.to_string());
+    }
+
+    fn is_transitive(&self, name_key: &str) -> bool {
+        self.transitive.contains(name_key)
+    }
+
+    fn depth(&self, name_key: &str) -> usize {
+        let mut d = 0;
+        let mut cur = name_key.to_string();
+        while let Some(parent) = self.parents.get(&cur) {
+            d += 1;
+            if d > 10 { break; } // cycle guard
+            cur = parent.clone();
+        }
+        d
+    }
+
+    /// Return all resolved packages that directly depend on `name_key`.
+    fn dependents_of(&self, name_key: &str) -> Vec<crate::config::PackageSpec> {
+        self.parents
+            .iter()
+            .filter(|(_, p)| p.as_str() == name_key)
+            .filter_map(|(child, _)| {
+                self.resolved.get(child).map(|lp| crate::config::PackageSpec {
+                    name: lp.name.clone(),
+                    version: Some(format!("=={}", lp.version)),
+                    extras: vec![],
+                })
+            })
+            .collect()
     }
 }
 
