@@ -3,7 +3,7 @@ use anyhow::{bail, Context, Result};
 use colored::Colorize;
 use std::path::Path;
 
-pub fn run(package: String, env: String) -> Result<()> {
+pub fn run(package: String, env: String, dev: bool) -> Result<()> {
     let config_path = Config::find(Path::new("."))
         .context("No envknit.yaml found.")?;
     let mut config = Config::load(&config_path)?;
@@ -11,15 +11,18 @@ pub fn run(package: String, env: String) -> Result<()> {
     let env_config = config.environments.get_mut(&env)
         .with_context(|| format!("Environment '{}' not found", env))?;
 
-    let before = env_config.packages.len();
-    env_config.packages.retain(|p| p.name != package);
+    let target = if dev { &mut env_config.dev_packages } else { &mut env_config.packages };
+    let before = target.len();
+    target.retain(|p| p.name != package);
 
-    if env_config.packages.len() == before {
-        bail!("Package '{}' not found in environment '{}'", package, env);
+    if target.len() == before {
+        let kind = if dev { "dev " } else { "" };
+        bail!("{}package '{}' not found in environment '{}'", kind, package, env);
     }
 
     config.save(&config_path)?;
-    println!("{} Removed '{}' from environment '{}'", "✓".green(), package, env);
+    let kind = if dev { " [dev]" } else { "" };
+    println!("{} Removed '{}'{} from environment '{}'", "✓".green(), package, kind, env);
     println!("  Run `envknit lock` to update the lock file");
     Ok(())
 }
@@ -50,7 +53,7 @@ mod tests {
     fn test_remove_existing() {
         let _g = crate::GLOBAL_CWD_LOCK.lock().unwrap();
         let (dir, orig) = setup("e");
-        run("numpy".to_string(), "default".to_string()).unwrap();
+        run("numpy".to_string(), "default".to_string(), false).unwrap();
         std::env::set_current_dir(orig).unwrap();
         let cfg = Config::load(&dir.join(crate::config::CONFIG_FILE)).unwrap();
         assert!(cfg.environments["default"].packages.is_empty());
@@ -60,7 +63,7 @@ mod tests {
     fn test_remove_nonexistent_fails() {
         let _g = crate::GLOBAL_CWD_LOCK.lock().unwrap();
         let (_dir, orig) = setup("nx");
-        let result = run("pandas".to_string(), "default".to_string());
+        let result = run("pandas".to_string(), "default".to_string(), false);
         std::env::set_current_dir(orig).unwrap();
         assert!(result.is_err());
     }
@@ -69,7 +72,28 @@ mod tests {
     fn test_remove_wrong_env_fails() {
         let _g = crate::GLOBAL_CWD_LOCK.lock().unwrap();
         let (_dir, orig) = setup("we");
-        let result = run("numpy".to_string(), "ml".to_string());
+        let result = run("numpy".to_string(), "ml".to_string(), false);
+        std::env::set_current_dir(orig).unwrap();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_remove_dev_package() {
+        let _g = crate::GLOBAL_CWD_LOCK.lock().unwrap();
+        let (dir, orig) = setup("dev");
+        add::run("pytest".to_string(), "default".to_string(), None, true).unwrap();
+        run("pytest".to_string(), "default".to_string(), true).unwrap();
+        std::env::set_current_dir(orig).unwrap();
+        let cfg = Config::load(&dir.join(crate::config::CONFIG_FILE)).unwrap();
+        assert!(cfg.environments["default"].dev_packages.is_empty());
+    }
+
+    #[test]
+    fn test_remove_dev_flag_wrong_list_fails() {
+        let _g = crate::GLOBAL_CWD_LOCK.lock().unwrap();
+        let (_dir, orig) = setup("devwrong");
+        // numpy is in packages, not dev_packages — removing with --dev should fail
+        let result = run("numpy".to_string(), "default".to_string(), true);
         std::env::set_current_dir(orig).unwrap();
         assert!(result.is_err());
     }

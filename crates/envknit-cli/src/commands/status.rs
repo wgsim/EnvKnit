@@ -33,17 +33,34 @@ pub fn run(env: Option<String>) -> Result<()> {
         println!();
         for env_name in &env_names {
             let pkgs = lock.packages_for_env(env_name);
+            let prod_pkgs: Vec<&crate::lockfile::LockedPackage> = pkgs.iter().copied().filter(|p| !p.dev).collect();
+            let dev_pkgs: Vec<&crate::lockfile::LockedPackage> = pkgs.iter().copied().filter(|p| p.dev).collect();
             let installed = pkgs.iter().filter(|p| p.install_path.is_some()).count();
+
             println!(
-                "  {} {} ({} packages, {} installed)",
-                "▸".cyan(), env_name.bold(), pkgs.len(), installed
+                "  {} {} ({} packages, {} installed{})",
+                "▸".cyan(),
+                env_name.bold(),
+                pkgs.len(),
+                installed,
+                if dev_pkgs.is_empty() { String::new() } else { format!(", {} dev", dev_pkgs.len()) },
             );
-            for pkg in pkgs.iter().take(10) {
-                let status = if pkg.install_path.is_some() { "✓".green() } else { "·".yellow() };
-                println!("    {} {}@{}", status, pkg.name, pkg.version.green());
-            }
-            if pkgs.len() > 10 {
-                println!("    {} ... and {} more", "·".dimmed(), pkgs.len() - 10);
+
+            let print_pkg_list = |list: &[&crate::lockfile::LockedPackage], limit: usize| {
+                for pkg in list.iter().take(limit) {
+                    let status = if pkg.install_path.is_some() { "✓".green() } else { "·".yellow() };
+                    println!("    {} {}@{}", status, pkg.name, pkg.version.green());
+                }
+                if list.len() > limit {
+                    println!("    {} ... and {} more", "·".dimmed(), list.len() - limit);
+                }
+            };
+
+            print_pkg_list(&prod_pkgs, 10);
+
+            if !dev_pkgs.is_empty() {
+                println!("    {} dev dependencies:", "·".dimmed());
+                print_pkg_list(&dev_pkgs, 5);
             }
         }
     }

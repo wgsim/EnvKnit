@@ -4,7 +4,7 @@ use colored::Colorize;
 use std::collections::HashSet;
 use std::path::Path;
 
-pub fn run(format: String, output: Option<String>) -> Result<()> {
+pub fn run(format: String, output: Option<String>, no_dev: bool) -> Result<()> {
     let lock_path = LockFile::find(Path::new("."))
         .context("No envknit.lock.yaml found.")?;
     let lock = LockFile::load(&lock_path)?;
@@ -13,6 +13,7 @@ pub fn run(format: String, output: Option<String>) -> Result<()> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut all_pkgs: Vec<_> = Vec::new();
     for pkg in lock.packages.iter() {
+        if no_dev && pkg.dev { continue; }
         let key = format!("{}=={}", pkg.name, pkg.version);
         if seen.insert(key) {
             all_pkgs.push(pkg);
@@ -20,6 +21,7 @@ pub fn run(format: String, output: Option<String>) -> Result<()> {
     }
     for env_pkgs in lock.environments.values() {
         for pkg in env_pkgs {
+            if no_dev && pkg.dev { continue; }
             let key = format!("{}=={}", pkg.name, pkg.version);
             if seen.insert(key) {
                 all_pkgs.push(pkg);
@@ -83,7 +85,7 @@ mod tests {
         let orig = std::env::current_dir().unwrap();
         std::env::set_current_dir(&dir).unwrap();
         let out = dir.join("out.txt");
-        run("requirements".to_string(), Some(out.to_string_lossy().to_string())).unwrap();
+        run("requirements".to_string(), Some(out.to_string_lossy().to_string()), false).unwrap();
         std::env::set_current_dir(orig).unwrap();
         let content = fs::read_to_string(&out).unwrap();
         assert!(content.contains("click==8.3.1"));
@@ -99,7 +101,7 @@ mod tests {
         let orig = std::env::current_dir().unwrap();
         std::env::set_current_dir(&dir).unwrap();
         let out = dir.join("out.json");
-        run("json".to_string(), Some(out.to_string_lossy().to_string())).unwrap();
+        run("json".to_string(), Some(out.to_string_lossy().to_string()), false).unwrap();
         std::env::set_current_dir(orig).unwrap();
         let content = fs::read_to_string(&out).unwrap();
         assert!(content.contains("numpy") && content.contains("1.26.4"));
@@ -112,7 +114,7 @@ mod tests {
         write_lock(&dir, HashMap::new());
         let orig = std::env::current_dir().unwrap();
         std::env::set_current_dir(&dir).unwrap();
-        let result = run("pip".to_string(), None);
+        let result = run("pip".to_string(), None, false);
         std::env::set_current_dir(orig).unwrap();
         assert!(result.is_err());
     }
@@ -129,7 +131,7 @@ mod tests {
         let orig = std::env::current_dir().unwrap();
         std::env::set_current_dir(&dir).unwrap();
         let out = dir.join("out.txt");
-        run("requirements".to_string(), Some(out.to_string_lossy().to_string())).unwrap();
+        run("requirements".to_string(), Some(out.to_string_lossy().to_string()), false).unwrap();
         std::env::set_current_dir(orig).unwrap();
         let content = fs::read_to_string(&out).unwrap();
         assert_eq!(content.matches("shared==1.0.0").count(), 1);

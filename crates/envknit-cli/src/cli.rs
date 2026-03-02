@@ -60,6 +60,9 @@ pub enum Commands {
         package: String,
         #[arg(long, default_value = "default")]
         env: String,
+        /// Remove from dev dependencies
+        #[arg(long)]
+        dev: bool,
     },
     /// Resolve dependencies and write lock file
     Lock {
@@ -109,6 +112,9 @@ pub enum Commands {
         format: String,
         #[arg(long)]
         output: Option<String>,
+        /// Exclude dev dependencies from output
+        #[arg(long)]
+        no_dev: bool,
     },
     /// Manage environments
     Env {

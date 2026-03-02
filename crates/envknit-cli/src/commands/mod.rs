@@ -22,14 +22,14 @@ pub fn dispatch(cli: Cli) -> Result<()> {
     match cli.command {
         Commands::Init { env, backend } => init::run(env, backend),
         Commands::Add { package, env, backend, dev } => add::run(package, env, backend, dev),
-        Commands::Remove { package, env } => remove::run(package, env),
+        Commands::Remove { package, env, dev } => remove::run(package, env, dev),
         Commands::Lock { update, dry_run } => lock::run(update, dry_run),
         Commands::Install { env, no_dev } => install::run(env, no_dev),
         Commands::Status { env } => status::run(env),
         Commands::Tree { env, depth } => tree::run(env, depth),
         Commands::Graph { env, json, depth } => graph::run(env, json, depth),
         Commands::Why { package, env } => why::run(package, env),
-        Commands::Export { format, output } => export::run(format, output),
+        Commands::Export { format, output, no_dev } => export::run(format, output, no_dev),
         Commands::Env { action } => match action {
             EnvAction::List => env_list::run(),
         },

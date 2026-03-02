@@ -3,6 +3,29 @@ use crate::lockfile::LockedPackage;
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
 use std::collections::HashSet;
+use std::path::PathBuf;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+const VERSIONS_TTL_SECS: u64 = 3600; // 1 hour
+
+fn cache_dir() -> PathBuf {
+    dirs_next::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".envknit")
+        .join("cache")
+}
+
+fn versions_cache_path(name: &str) -> PathBuf {
+    cache_dir().join("versions").join(format!("{}.json", normalize_name(name)))
+}
+
+fn info_cache_path(name: &str, version: &str) -> PathBuf {
+    cache_dir().join("info").join(normalize_name(name)).join(format!("{}.json", version))
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::ZERO).as_secs()
+}
 
 pub struct Resolver {
     pub dry_run: bool,
@@ -97,7 +120,15 @@ impl Resolver {
     }
 
     /// Fetch `requires_dist` list for a specific package version from PyPI.
+    /// Results are cached permanently (release metadata is immutable).
     fn fetch_pypi_info(&self, package: &str, version: &str) -> Result<Vec<String>> {
+        let cache_path = info_cache_path(package, version);
+        if let Ok(raw) = std::fs::read_to_string(&cache_path) {
+            if let Ok(deps) = serde_json::from_str::<Vec<String>>(&raw) {
+                return Ok(deps);
+            }
+        }
+
         let url = format!("https://pypi.org/pypi/{}/{}/json", package, version);
         let client = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(10))
@@ -130,10 +161,34 @@ impl Resolver {
             })
             .unwrap_or_default();
 
+        if let Some(parent) = cache_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&cache_path, serde_json::to_string(&requires_dist).unwrap_or_default());
+
         Ok(requires_dist)
     }
 
     fn fetch_pypi_versions(&self, package: &str) -> Result<Vec<String>> {
+        let cache_path = versions_cache_path(package);
+
+        // Cache hit: check TTL
+        if let Ok(raw) = std::fs::read_to_string(&cache_path) {
+            if let Ok(obj) = serde_json::from_str::<serde_json::Value>(&raw) {
+                let ts = obj["ts"].as_u64().unwrap_or(0);
+                if now_secs().saturating_sub(ts) < VERSIONS_TTL_SECS {
+                    if let Some(arr) = obj["versions"].as_array() {
+                        let versions: Vec<String> = arr.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect();
+                        if !versions.is_empty() {
+                            return Ok(versions);
+                        }
+                    }
+                }
+            }
+        }
+
         let url = format!("https://pypi.org/pypi/{}/json", package);
         let client = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(10))
@@ -163,6 +218,13 @@ impl Resolver {
 
         let mut sorted = releases;
         sorted.sort_by(|a, b| Self::compare_version_strings(b, a));
+
+        if let Some(parent) = cache_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let entry = serde_json::json!({ "ts": now_secs(), "versions": sorted });
+        let _ = std::fs::write(&cache_path, entry.to_string());
+
         Ok(sorted)
     }
 
