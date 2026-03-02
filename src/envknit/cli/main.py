@@ -35,7 +35,7 @@ console = Console()
 
 # Constants
 CONFIG_FILE = "envknit.yaml"
-LOCK_FILE = "envknit-lock.yaml"
+LOCK_FILE = "envknit.lock.yaml"
 DEFAULT_ENV = "default"
 
 

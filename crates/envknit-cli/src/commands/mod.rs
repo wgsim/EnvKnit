@@ -1,14 +1,16 @@
 pub mod add;
+pub mod env_list;
 pub mod export;
 pub mod init;
 pub mod install;
 pub mod lock;
 pub mod remove;
+pub mod run;
 pub mod status;
 pub mod tree;
 pub mod why;
 
-use crate::cli::{Cli, Commands};
+use crate::cli::{Cli, Commands, EnvAction};
 use anyhow::Result;
 
 pub fn dispatch(cli: Cli) -> Result<()> {
@@ -22,5 +24,9 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         Commands::Tree { env, depth } => tree::run(env, depth),
         Commands::Why { package, env } => why::run(package, env),
         Commands::Export { format, output } => export::run(format, output),
+        Commands::Env { action } => match action {
+            EnvAction::List => env_list::run(),
+        },
+        Commands::Run { env, command } => run::run(env, command),
     }
 }

@@ -1,5 +1,11 @@
 use clap::{Parser, Subcommand};
 
+#[derive(Subcommand)]
+pub enum EnvAction {
+    /// List all environments
+    List,
+}
+
 #[derive(Parser)]
 #[command(
     name = "envknit",
@@ -72,5 +78,18 @@ pub enum Commands {
         format: String,
         #[arg(long)]
         output: Option<String>,
+    },
+    /// Manage environments
+    Env {
+        #[command(subcommand)]
+        action: EnvAction,
+    },
+    /// Run a command in an environment's package context
+    Run {
+        #[arg(long, default_value = "default")]
+        env: String,
+        /// Command and arguments (everything after --)
+        #[arg(last = true)]
+        command: Vec<String>,
     },
 }

@@ -207,7 +207,7 @@ def find_project_root():
 
 def find_lock_file(project_root: Path) -> Path:
     """Find the lock file for the project."""
-    for lock_name in ["envknit-lock.yaml", ".envknit-lock.yaml", "envknit.lock"]:
+    for lock_name in ["envknit.lock.yaml", "envknit-lock.yaml", ".envknit-lock.yaml", "envknit.lock"]:
         lock_path = project_root / lock_name
         if lock_path.exists():
             return lock_path
@@ -729,7 +729,7 @@ class ToolDispatcher:
         Returns:
             Lock file path or None if not found
         """
-        for lock_name in ["envknit-lock.yaml", ".envknit-lock.yaml", "envknit.lock"]:
+        for lock_name in ["envknit.lock.yaml", "envknit-lock.yaml", ".envknit-lock.yaml", "envknit.lock"]:
             lock_path = project_root / lock_name
             if lock_path.exists():
                 return lock_path

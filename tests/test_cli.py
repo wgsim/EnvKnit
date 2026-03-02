@@ -73,7 +73,7 @@ def locked_project(initialized_project, runner):
             ]
         },
     }
-    (initialized_project / "envknit-lock.yaml").write_text(yaml.dump(lock_data))
+    (initialized_project / "envknit.lock.yaml").write_text(yaml.dump(lock_data))
     return initialized_project
 
 
@@ -1081,7 +1081,7 @@ class TestInstall:
             "generated_at": "2025-01-01T00:00:00",
             "environments": {"default": []},
         }
-        (initialized_project / "envknit-lock.yaml").write_text(_yaml.dump(lock_data))
+        (initialized_project / "envknit.lock.yaml").write_text(_yaml.dump(lock_data))
 
         with patch("envknit.cli.main.get_backend") as mock_get_backend:
             mock_backend = MagicMock()
@@ -1124,7 +1124,7 @@ class TestResolveWithPackages:
             result = runner.invoke(app, ["resolve", "--dry-run"])
 
         assert result.exit_code == 0
-        assert not (initialized_project / "envknit-lock.yaml").exists()
+        assert not (initialized_project / "envknit.lock.yaml").exists()
 
     def test_resolve_two_packages_saves_lock(self, initialized_project, runner):
         """resolve without --dry-run writes a lock file on success."""
@@ -1149,7 +1149,7 @@ class TestResolveWithPackages:
             result = runner.invoke(app, ["resolve"])
 
         assert result.exit_code == 0
-        assert (initialized_project / "envknit-lock.yaml").exists()
+        assert (initialized_project / "envknit.lock.yaml").exists()
 
     def test_resolve_conflict_exits_nonzero(self, initialized_project, runner):
         """resolve exits non-zero when resolution has conflicts."""
@@ -1236,7 +1236,7 @@ class TestLockWithMockedBackend:
             result = runner.invoke(app, ["lock"])
 
         assert result.exit_code == 0
-        assert (initialized_project / "envknit-lock.yaml").exists()
+        assert (initialized_project / "envknit.lock.yaml").exists()
 
     def test_lock_specific_env(self, initialized_project, runner):
         """lock --env default locks only the named environment."""
@@ -1511,7 +1511,7 @@ class TestAuto:
 
     def test_auto_with_project_and_lock(self, initialized_project, runner):
         """auto exits 0 when project has both config and lock file."""
-        lock_path = initialized_project / "envknit-lock.yaml"
+        lock_path = initialized_project / "envknit.lock.yaml"
         lock_path.write_text("version: 1\nenvironments: {}\n")
         with patch("envknit.isolation.shim.ToolDispatcher.find_project_root") as mock_root, \
              patch("envknit.isolation.shim.ToolDispatcher.find_lock_file") as mock_lock:
@@ -1522,7 +1522,7 @@ class TestAuto:
 
     def test_auto_verbose_with_lock(self, initialized_project, runner):
         """auto --verbose with lock file shows tool paths."""
-        lock_path = initialized_project / "envknit-lock.yaml"
+        lock_path = initialized_project / "envknit.lock.yaml"
         lock_path.write_text("version: 1\nenvironments: {}\n")
         with patch("envknit.isolation.shim.ToolDispatcher.find_project_root") as mock_root, \
              patch("envknit.isolation.shim.ToolDispatcher.find_lock_file") as mock_lock, \

@@ -5,13 +5,36 @@ use std::path::{Path, PathBuf};
 
 pub const CONFIG_FILE: &str = "envknit.yaml";
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Clone)]
 pub struct PackageSpec {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extras: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum PackageSpecInput {
+    String(String),
+    Struct {
+        name: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        version: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        extras: Vec<String>,
+    },
+}
+
+impl<'de> serde::Deserialize<'de> for PackageSpec {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let input = PackageSpecInput::deserialize(deserializer)?;
+        Ok(match input {
+            PackageSpecInput::String(s) => PackageSpec::parse(&s),
+            PackageSpecInput::Struct { name, version, extras } => PackageSpec { name, version, extras },
+        })
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -169,5 +192,31 @@ mod tests {
         let dir = tmpdir("notfound");
         let found = Config::find(&dir);
         assert!(found.is_none());
+    }
+
+    #[test]
+    fn test_parse_string_packages_from_yaml() {
+        let dir = tmpdir("str_yaml");
+        let yaml = "environments:\n  default:\n    packages:\n      - numpy>=1.24\n      - click\n";
+        let path = dir.join(CONFIG_FILE);
+        std::fs::write(&path, yaml).unwrap();
+        let cfg = Config::load(&path).unwrap();
+        let pkgs = &cfg.environments["default"].packages;
+        assert_eq!(pkgs[0].name, "numpy");
+        assert_eq!(pkgs[0].version.as_deref(), Some(">=1.24"));
+        assert_eq!(pkgs[1].name, "click");
+        assert!(pkgs[1].version.is_none());
+    }
+
+    #[test]
+    fn test_parse_struct_packages_from_yaml() {
+        let dir = tmpdir("struct_yaml");
+        let yaml = "environments:\n  default:\n    packages:\n      - name: numpy\n        version: '>=1.24'\n";
+        let path = dir.join(CONFIG_FILE);
+        std::fs::write(&path, yaml).unwrap();
+        let cfg = Config::load(&path).unwrap();
+        let pkgs = &cfg.environments["default"].packages;
+        assert_eq!(pkgs[0].name, "numpy");
+        assert_eq!(pkgs[0].version.as_deref(), Some(">=1.24"));
     }
 }
