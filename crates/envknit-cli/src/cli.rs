@@ -93,6 +93,21 @@ pub enum Commands {
         /// Skip dev dependencies
         #[arg(long)]
         no_dev: bool,
+        /// Remove unreferenced store entries after installation
+        #[arg(long)]
+        auto_cleanup: bool,
+    },
+    /// Verify config and lock file are in sync (useful in CI)
+    Check,
+    /// Compare two lock files and show added/removed/changed packages
+    Diff {
+        /// Base lock file path
+        base: String,
+        /// Head lock file path
+        head: String,
+        /// Scope diff to a specific environment
+        #[arg(long)]
+        env: Option<String>,
     },
     /// Show status of installed environments
     Status {
@@ -140,6 +155,9 @@ pub enum Commands {
     Run {
         #[arg(long, default_value = "default")]
         env: String,
+        /// Exclude dev packages from PYTHONPATH
+        #[arg(long)]
+        no_dev: bool,
         /// Command and arguments (everything after --)
         #[arg(last = true)]
         command: Vec<String>,
@@ -154,6 +172,13 @@ pub enum Commands {
         /// Shell name (bash/zsh/fish); defaults to $SHELL
         #[arg(long)]
         shell: Option<String>,
+    },
+    /// Pin config packages to exact versions from the lock file
+    Pin {
+        #[arg(long, default_value = "default")]
+        env: String,
+        /// Pin a specific package only (pins all if omitted)
+        package: Option<String>,
     },
     /// Upgrade package(s) to latest (removes == pins; keeps flexible constraints)
     Upgrade {

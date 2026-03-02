@@ -2,7 +2,7 @@ use crate::lockfile::LockFile;
 use anyhow::{Context, Result};
 use std::path::Path;
 
-pub fn run(env: String, command: Vec<String>) -> Result<()> {
+pub fn run(env: String, command: Vec<String>, no_dev: bool) -> Result<()> {
     if command.is_empty() {
         anyhow::bail!("No command specified. Usage: envknit run --env <env> -- <command> [args...]");
     }
@@ -14,6 +14,7 @@ pub fn run(env: String, command: Vec<String>) -> Result<()> {
 
     let install_paths: Vec<String> = pkgs
         .iter()
+        .filter(|p| !no_dev || !p.dev)
         .filter_map(|p| p.install_path.clone())
         .collect();
 
@@ -35,6 +36,7 @@ pub fn run(env: String, command: Vec<String>) -> Result<()> {
     let status = std::process::Command::new(prog)
         .args(args)
         .env("PYTHONPATH", &new_pythonpath)
+        .env("ENVKNIT_ENV", &env)
         .status()
         .with_context(|| format!("Failed to run '{}'", prog))?;
 

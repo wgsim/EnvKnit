@@ -60,7 +60,8 @@ pub fn run(update: Option<String>, dry_run: bool, env: Option<String>) -> Result
         };
 
         if specs.is_empty() && dev_specs.is_empty() {
-            println!("    (no matching packages)");
+            println!("    (no packages)");
+            env_packages.insert(env_name.clone(), vec![]);
             continue;
         }
 

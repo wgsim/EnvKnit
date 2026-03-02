@@ -4,7 +4,7 @@ use colored::Colorize;
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 
-pub fn run(env: Option<String>, no_dev: bool) -> Result<()> {
+pub fn run(env: Option<String>, no_dev: bool, auto_cleanup: bool) -> Result<()> {
     let lock_path = LockFile::find(Path::new("."))
         .context("No envknit.lock.yaml found. Run `envknit lock` first.")?;
     let mut lock = LockFile::load(&lock_path)?;
@@ -42,6 +42,12 @@ pub fn run(env: Option<String>, no_dev: bool) -> Result<()> {
 
     lock.save(&lock_path)?;
     println!("{} Installation complete.", "✓".green());
+
+    if auto_cleanup {
+        println!("{} Running store cleanup...", "→".cyan());
+        super::store::cleanup(false)?;
+    }
+
     Ok(())
 }
 
