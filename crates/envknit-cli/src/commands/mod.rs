@@ -3,6 +3,7 @@ pub mod env_list;
 pub mod export;
 pub mod graph;
 pub mod init;
+pub mod init_shell;
 pub mod install;
 pub mod lock;
 pub mod remove;
@@ -38,6 +39,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             StoreAction::Stats => store::stats(),
             StoreAction::Cleanup { dry_run } => store::cleanup(dry_run),
         },
+        Commands::InitShell { shell } => init_shell::run(shell),
         Commands::Upgrade { package, env, version } => upgrade::run(package, env, version),
     }
 }

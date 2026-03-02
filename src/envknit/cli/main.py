@@ -203,6 +203,14 @@ def app(ctx: click.Context) -> None:
     Manage isolated package environments within a single project.
     """
     ctx.ensure_object(dict)
+    import os
+    if not os.environ.get("ENVKNIT_NO_DEPRECATION_WARNING"):
+        console.print(
+            "[yellow]⚠ The Python CLI is deprecated and will be removed in a future release.[/yellow]\n"
+            "  Please use the Rust CLI instead: https://github.com/wgsim/EnvKnit\n"
+            "  To silence this warning: [dim]export ENVKNIT_NO_DEPRECATION_WARNING=1[/dim]",
+            stderr=True,
+        )
 
 
 # ============================================================================

@@ -125,6 +125,12 @@ pub enum Commands {
         #[command(subcommand)]
         action: StoreAction,
     },
+    /// Print shell integration snippet (use: eval "$(envknit init-shell)")
+    InitShell {
+        /// Shell name (bash/zsh/fish); defaults to $SHELL
+        #[arg(long)]
+        shell: Option<String>,
+    },
     /// Upgrade package(s) to latest (removes == pins; keeps flexible constraints)
     Upgrade {
         /// Package name (upgrades all if omitted)
