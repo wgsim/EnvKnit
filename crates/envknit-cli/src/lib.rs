@@ -5,6 +5,7 @@ pub mod config;
 pub mod error;
 pub mod global_config;
 pub mod lockfile;
+pub mod node_resolver;
 pub mod python_resolver;
 pub mod resolver;
 
