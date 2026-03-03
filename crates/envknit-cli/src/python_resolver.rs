@@ -22,15 +22,22 @@ pub fn resolve_python(version_spec: &str) -> Result<PathBuf> {
     }
 
     // Try system python
-    if let Some(p) = try_system(version_spec) {
-        return Ok(p);
+    match try_system(version_spec) {
+        Some(p) => {
+            eprintln!(
+                "warning: python_version '{}' not found via mise or pyenv, \
+                 using system Python: {}",
+                version_spec,
+                p.display()
+            );
+            Ok(p)
+        }
+        None => bail!(
+            "No Python {} found via mise, pyenv, or system PATH.\n  \
+             Install it with: pyenv install {} OR mise use python@{}",
+            version_spec, version_spec, version_spec
+        ),
     }
-
-    bail!(
-        "No Python {} found via mise, pyenv, or system PATH.\n  \
-         Install it with: pyenv install {} OR mise use python@{}",
-        version_spec, version_spec, version_spec
-    )
 }
 
 fn try_mise(version_spec: &str) -> Option<PathBuf> {
