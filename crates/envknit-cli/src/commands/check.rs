@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::lockfile::LockFile;
+use crate::node_resolver;
 use anyhow::{Context, Result};
 use colored::Colorize;
 use std::path::Path;
@@ -59,12 +60,32 @@ pub fn run() -> Result<()> {
         }
     }
 
+    let mut warnings: Vec<String> = Vec::new();
+
+    // node_version resolution check (Warn, not Fail)
+    for (env_name, env_cfg) in &config.environments {
+        if let Some(ref ver) = env_cfg.node_version {
+            if node_resolver::resolve_node(ver).is_err() {
+                warnings.push(format!(
+                    "[{}] node_version '{}' could not be resolved (install fnm/mise)",
+                    env_name, ver
+                ));
+            }
+        }
+    }
+
     if issues.is_empty() {
         println!("  {} Config and lock file are in sync.", "✓".green());
+        for w in &warnings {
+            println!("  {} {}", "!".yellow(), w);
+        }
         Ok(())
     } else {
         for issue in &issues {
             println!("  {} {}", "✗".red(), issue);
+        }
+        for w in &warnings {
+            println!("  {} {}", "!".yellow(), w);
         }
         println!();
         anyhow::bail!(
@@ -152,5 +173,24 @@ mod tests {
         let result = run();
         std::env::set_current_dir(orig).unwrap();
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_check_warns_on_unresolvable_node_version() {
+        let _g = crate::GLOBAL_CWD_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join(format!(
+            "envknit_check_node_test_{}", std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let yaml = "environments:\n  default:\n    node_version: '99.99.99'\n    packages: []\n";
+        std::fs::write(dir.join("envknit.yaml"), yaml).unwrap();
+        let lock_yaml = "schema_version: '1.0'\nlock_generated_at: '2026-01-01T00:00:00+00:00'\nresolver_version: '0.1.0'\nenvironments:\n  default: []\n";
+        std::fs::write(dir.join("envknit.lock.yaml"), lock_yaml).unwrap();
+        let orig = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&dir).unwrap();
+        let result = run();
+        std::env::set_current_dir(orig).unwrap();
+        // check should pass (exit 0) — node_version failure is a Warn, not Fail
+        assert!(result.is_ok(), "unresolvable node_version should be Warn not Fail in check: {:?}", result);
     }
 }
