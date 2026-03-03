@@ -237,5 +237,23 @@ mod tests {
             cfg.environments["frontend"].node_version.as_deref(),
             Some("20.11")
         );
+
+        // Also test serialization: save a Config with node_version, reload, and assert it survives.
+        let mut envs = HashMap::new();
+        envs.insert("frontend".to_string(), EnvironmentConfig {
+            packages: vec![],
+            dev_packages: vec![],
+            backend: None,
+            python_version: None,
+            node_version: Some("20.11".to_string()),
+        });
+        let cfg2 = Config { envknit_version: None, environments: envs };
+        let save_path = dir.join("envknit2.yaml");
+        cfg2.save(&save_path).unwrap();
+        let reloaded = Config::load(&save_path).unwrap();
+        assert_eq!(
+            reloaded.environments["frontend"].node_version.as_deref(),
+            Some("20.11")
+        );
     }
 }
