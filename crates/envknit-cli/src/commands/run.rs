@@ -35,18 +35,20 @@ pub fn run(env: String, command: Vec<String>, no_dev: bool) -> Result<()> {
         format!("{}:{}", install_paths.join(":"), existing_pythonpath)
     };
 
+    // Load config once; extract version fields before borrowing ends
+    let config = Config::find(Path::new(".")).and_then(|p| Config::load(&p).ok());
+    let env_cfg = config.as_ref().and_then(|c| c.environments.get(&env));
+    let python_ver = env_cfg.and_then(|e| e.python_version.clone());
+    let node_ver = env_cfg.and_then(|e| e.node_version.clone());
+
     // Resolve python interpreter from python_version if set in config
-    let python_path: Option<String> = Config::find(Path::new("."))
-        .and_then(|p| Config::load(&p).ok())
-        .and_then(|c| c.environments.get(&env).and_then(|e| e.python_version.clone()))
+    let python_path: Option<String> = python_ver
         .and_then(|ver| python_resolver::resolve_python(&ver).ok())
         .map(|p| p.to_string_lossy().to_string());
 
     // Resolve Node.js bin directory from node_version if set in config.
     // On failure: warn to stderr and continue (system node used as fallback).
-    let node_bin: Option<std::path::PathBuf> = Config::find(std::path::Path::new("."))
-        .and_then(|p| Config::load(&p).ok())
-        .and_then(|c| c.environments.get(&env).and_then(|e| e.node_version.clone()))
+    let node_bin: Option<std::path::PathBuf> = node_ver
         .and_then(|ver| match node_resolver::resolve_node(&ver) {
             Ok(node_path) => Some(node_resolver::node_bin_dir(&node_path)),
             Err(e) => {
