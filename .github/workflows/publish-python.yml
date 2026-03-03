@@ -1,0 +1,37 @@
+name: Publish Python Library
+
+# Publishes the `envknit` Python package to PyPI on version tag pushes.
+# Requires PYPI_TOKEN secret to be set in repository settings.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+jobs:
+  publish:
+    name: Build and publish to PyPI
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write   # for OIDC trusted publishing (alternative to token)
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tools
+        run: pip install build
+
+      - name: Build distribution
+        run: python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # Uses OIDC trusted publishing — no token needed if configured on PyPI.
+        # Fallback: set PYPI_TOKEN secret and uncomment below.
+        # with:
+        #   password: ${{ secrets.PYPI_TOKEN }}

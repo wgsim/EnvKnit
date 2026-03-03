@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::global_config::GlobalConfig;
 use crate::lockfile::{LockedPackage, LockFile};
 use crate::python_resolver;
 use anyhow::{Context, Result};
@@ -98,10 +99,13 @@ fn resolve_pip_for_env(env_name: &str, config: &Option<Config>) -> Vec<String> {
 /// Already-cached packages are identified first (sequential), then new packages
 /// are installed concurrently.
 fn install_packages_mut(mut packages: Vec<&mut LockedPackage>, _env_name: &str, pip_cmd: Vec<String>) -> Result<()> {
-    let store_base = dirs_next::home_dir()
-        .context("Cannot determine home directory")?
-        .join(".envknit")
-        .join("packages");
+    let global_cfg = GlobalConfig::load().unwrap_or_default();
+    let store_base = global_cfg.effective_store_dir();
+    // Apply parallel job limit from global config.
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(global_cfg.parallel_jobs)
+        .build_global()
+        .unwrap_or(());  // Ignore error if pool already initialized.
     std::fs::create_dir_all(&store_base)?;
 
     // Split into already-handled and needs-install

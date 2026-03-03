@@ -5,6 +5,10 @@ edition = "2021"
 description = "EnvKnit CLI — standalone binary for multi-version Python package management"
 license = "MIT"
 
+[lib]
+name = "envknit_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "envknit"
 path = "src/main.rs"

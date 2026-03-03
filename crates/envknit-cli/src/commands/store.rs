@@ -1,13 +1,14 @@
 use anyhow::Result;
 use colored::Colorize;
-use dirs_next::home_dir;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use crate::global_config::GlobalConfig;
 use crate::lockfile::LockFile;
 
 fn store_base() -> Option<PathBuf> {
-    home_dir().map(|h| h.join(".envknit").join("packages"))
+    let cfg = GlobalConfig::load().unwrap_or_default();
+    Some(cfg.effective_store_dir())
 }
 
 fn dir_size(path: &Path) -> u64 {

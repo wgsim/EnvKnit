@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::global_config::GlobalConfig;
 use crate::lockfile::LockFile;
 use crate::python_resolver;
 use anyhow::Result;
@@ -175,6 +176,33 @@ pub fn run() -> Result<()> {
                 }
             }
         }
+    }
+
+    // --- global config (~/.envknit/config.yaml) ---
+    match GlobalConfig::path() {
+        Some(ref path) if path.exists() => {
+            match GlobalConfig::load() {
+                Ok(gcfg) => {
+                    let mut parts = vec![path.display().to_string()];
+                    if let Some(ref b) = gcfg.default_backend {
+                        parts.push(format!("backend={}", b));
+                    }
+                    if let Some(ref v) = gcfg.default_python_version {
+                        parts.push(format!("python={}", v));
+                    }
+                    parts.push(format!("jobs={}", gcfg.parallel_jobs));
+                    checks.push(Check::ok("global config", parts.join(", ")));
+                }
+                Err(e) => checks.push(Check::fail("global config", format!("parse error: {}", e))),
+            }
+        }
+        Some(ref path) => {
+            checks.push(Check::ok(
+                "global config",
+                format!("not found at {} (using defaults)", path.display()),
+            ));
+        }
+        None => checks.push(Check::warn("global config", "home directory not found")),
     }
 
     // --- git (optional) ---

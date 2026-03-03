@@ -46,13 +46,29 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Linux amd64 (glibc)
           - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
             artifact_name: envknit-linux-amd64
             binary_path: target/release/envknit
+          # Linux amd64 (musl — portable, no glibc dep)
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            artifact_name: envknit-linux-amd64-musl
+            binary_path: target/x86_64-unknown-linux-musl/release/envknit
+          # macOS amd64
           - os: macos-latest
+            target: x86_64-apple-darwin
             artifact_name: envknit-macos-amd64
             binary_path: target/release/envknit
+          # macOS arm64 (Apple Silicon)
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: envknit-macos-arm64
+            binary_path: target/aarch64-apple-darwin/release/envknit
+          # Windows amd64
           - os: windows-latest
+            target: x86_64-pc-windows-msvc
             artifact_name: envknit-windows-amd64.exe
             binary_path: target/release/envknit.exe
 
@@ -73,18 +89,31 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      - name: Install system dependencies (Ubuntu)
-        if: runner.os == 'Linux'
+      - name: Install system dependencies (Ubuntu / glibc)
+        if: runner.os == 'Linux' && matrix.target == 'x86_64-unknown-linux-gnu'
         run: sudo apt-get install -y pkg-config libssl-dev
 
-      - name: Build release binary
-        run: cargo build --release --manifest-path crates/envknit-cli/Cargo.toml
-
-      - name: Smoke test (Unix)
-        if: runner.os != 'Windows'
+      - name: Install system dependencies (Ubuntu / musl)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
         run: |
-          ./target/release/envknit --version
-          ./target/release/envknit --help
+          sudo apt-get install -y musl-tools pkg-config
+          rustup target add x86_64-unknown-linux-musl
+
+      - name: Add macOS cross-compile target (arm64)
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: rustup target add aarch64-apple-darwin
+
+      - name: Build release binary
+        run: >
+          cargo build --release
+          --manifest-path crates/envknit-cli/Cargo.toml
+          --target ${{ matrix.target }}
+
+      - name: Smoke test (native Linux/macOS)
+        if: runner.os != 'Windows' && matrix.target != 'aarch64-apple-darwin'
+        run: |
+          "${{ matrix.binary_path }}" --version
+          "${{ matrix.binary_path }}" --help
 
       - name: Smoke test (Windows)
         if: runner.os == 'Windows'
@@ -126,6 +155,9 @@ jobs:
         with:
           files: |
             artifacts/envknit-linux-amd64/envknit-linux-amd64
+            artifacts/envknit-linux-amd64-musl/envknit-linux-amd64-musl
             artifacts/envknit-macos-amd64/envknit-macos-amd64
+            artifacts/envknit-macos-arm64/envknit-macos-arm64
             artifacts/envknit-windows-amd64.exe/envknit-windows-amd64.exe
           draft: false
+          generate_release_notes: true
