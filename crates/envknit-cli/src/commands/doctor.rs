@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::global_config::GlobalConfig;
 use crate::lockfile::LockFile;
+use crate::node_resolver;
 use crate::python_resolver;
 use anyhow::Result;
 use colored::Colorize;
@@ -172,6 +173,27 @@ pub fn run() -> Result<()> {
                     Err(e) => checks.push(Check::fail(
                         "python_version",
                         format!("[{}] {} not found: {}", env_name, ver, e),
+                    )),
+                }
+            }
+        }
+    }
+
+    // --- node_version per environment ---
+    if let Some(cfg) = Config::find(Path::new(".")).and_then(|p| Config::load(&p).ok()) {
+        for (env_name, env_cfg) in &cfg.environments {
+            if let Some(ref ver) = env_cfg.node_version {
+                match node_resolver::resolve_node(ver) {
+                    Ok(path) => checks.push(Check::ok(
+                        "node_version",
+                        format!("[{}] {} → {}", env_name, ver, node_resolver::node_bin_dir(&path).display()),
+                    )),
+                    Err(_) => checks.push(Check::warn(
+                        "node_version",
+                        format!(
+                            "[{}] {} not found — install fnm or mise, then: fnm install {}",
+                            env_name, ver, ver
+                        ),
                     )),
                 }
             }
