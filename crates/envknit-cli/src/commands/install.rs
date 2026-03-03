@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::global_config::GlobalConfig;
 use crate::lockfile::{LockedPackage, LockFile};
+use crate::node_resolver;
 use crate::python_resolver;
 use anyhow::{Context, Result};
 use colored::Colorize;
@@ -41,6 +42,27 @@ pub fn run(env: Option<String>, no_dev: bool, auto_cleanup: bool) -> Result<()> 
 
             // Resolve pip command for this environment's python_version
             let pip_cmd = resolve_pip_for_env(env_name, &config);
+
+            // Warn if node_version is configured but cannot be resolved (non-blocking)
+            if let Some(env_cfg) = config.as_ref().and_then(|c| c.environments.get(env_name)) {
+                if let Some(ref ver) = env_cfg.node_version {
+                    if let Err(e) = node_resolver::resolve_node(ver) {
+                        let system_ver = std::process::Command::new("node")
+                            .arg("--version")
+                            .output()
+                            .ok()
+                            .filter(|o| o.status.success())
+                            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                            .unwrap_or_else(|| "not found".to_string());
+                        eprintln!(
+                            "⚠ node_version '{}' could not be resolved: {}\n  \
+                             Falling back to system node: {}\n  \
+                             Install fnm or mise to enforce version isolation.",
+                            ver, e, system_ver
+                        );
+                    }
+                }
+            }
 
             let pkgs: Vec<_> = lock
                 .environments
