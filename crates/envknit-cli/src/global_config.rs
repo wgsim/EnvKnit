@@ -20,6 +20,10 @@ pub struct GlobalConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub store_dir: Option<String>,
 
+    /// Node.js version manager to use for `node` toolchain management. // e.g. "mise", "fnm", "nvm"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node_version_manager: Option<String>,
+
     /// PyPI metadata cache TTL in seconds (default: 300).
     #[serde(default = "default_cache_ttl")]
     pub cache_ttl_secs: u64,
@@ -43,6 +47,7 @@ impl Default for GlobalConfig {
             default_backend: None,
             default_python_version: None,
             store_dir: None,
+            node_version_manager: None,
             cache_ttl_secs: default_cache_ttl(),
             parallel_jobs: default_parallel_jobs(),
         }
@@ -131,6 +136,7 @@ mod tests {
             default_backend: Some("pip".to_string()),
             default_python_version: Some("3.11".to_string()),
             store_dir: None,
+            node_version_manager: None,
             cache_ttl_secs: 600,
             parallel_jobs: 8,
         };
@@ -150,5 +156,21 @@ mod tests {
         let cfg: Result<GlobalConfig, _> = serde_yaml::from_str(yaml);
         // Empty YAML parses to default struct.
         assert!(cfg.is_ok());
+    }
+
+    #[test]
+    fn test_node_version_manager_round_trips() {
+        // Load: YAML with node_version_manager deserializes correctly.
+        let yaml = "node_version_manager: fnm\n";
+        let cfg: GlobalConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(cfg.node_version_manager, Some("fnm".to_string()));
+
+        // Skip-if-none: field must be absent when None.
+        let cfg_none = GlobalConfig::default();
+        let serialized = serde_yaml::to_string(&cfg_none).unwrap();
+        assert!(
+            !serialized.contains("node_version_manager"),
+            "Expected field to be omitted when None, got: {serialized}"
+        );
     }
 }
