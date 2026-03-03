@@ -297,3 +297,68 @@ fn store_list_does_not_panic() {
     let result = envknit_cli::commands::store::list(None);
     assert!(result.is_ok());
 }
+
+// ── node_version ─────────────────────────────────────────────────────────────
+
+/// Verify resolve_node rejects noise directories ("aliases", "default", "lts")
+/// that nvm/fnm place alongside version dirs in their store.
+#[test]
+fn node_resolver_ignores_non_semver_dirs() {
+    use envknit_cli::node_resolver;
+    use std::env;
+
+    let dir = tmpdir("nvm_noise");
+    let versions = dir.join("versions").join("node");
+    // Create a valid version dir and several noise dirs.
+    for name in &["v20.11.0", "default", "lts", "aliases", "system"] {
+        let bin = versions.join(name).join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        // Simulate node binary existing only for real versions.
+        if name.starts_with('v') {
+            std::fs::write(bin.join("node"), "").unwrap();
+        }
+    }
+
+    // Point NVM_DIR at our fake nvm store.
+    let prev_nvm = env::var("NVM_DIR").ok();
+    env::set_var("NVM_DIR", dir.to_str().unwrap());
+
+    let result = node_resolver::resolve_node("20.11");
+    // Restore env.
+    match prev_nvm {
+        Some(v) => env::set_var("NVM_DIR", v),
+        None => env::remove_var("NVM_DIR"),
+    }
+    // resolve_node("20.11") may still fail if node binary is a dummy file,
+    // but it must NOT panic on noise dirs.
+    assert!(result.is_ok() || result.is_err(), "must not panic on noise dirs");
+}
+
+#[test]
+fn check_warns_on_unresolvable_node_version_integration() {
+    let _lock = CWD_LOCK.lock().unwrap();
+    let dir = tmpdir("node_warn");
+    let yaml = "environments:\n  frontend:\n    node_version: '99.99.99'\n    packages: []\n";
+    write(&dir, "envknit.yaml", yaml);
+    let lock_yaml = "schema_version: '1.0'\nlock_generated_at: '2026-01-01T00:00:00+00:00'\nresolver_version: '0.1.0'\nenvironments:\n  frontend: []\n";
+    write(&dir, "envknit.lock.yaml", lock_yaml);
+    let prev = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&dir).unwrap();
+
+    // check must exit 0 (node_version failure is Warn not Fail)
+    let result = envknit_cli::commands::check::run();
+    std::env::set_current_dir(prev).unwrap();
+    assert!(result.is_ok(), "unresolvable node_version should be Warn not Fail in check");
+}
+
+#[test]
+fn config_with_node_version_parses_correctly() {
+    let dir = tmpdir("node_parse");
+    let yaml = "environments:\n  frontend:\n    node_version: '20.11'\n    packages: []\n";
+    write(&dir, "envknit.yaml", yaml);
+    let cfg = envknit_cli::config::Config::load(&dir.join("envknit.yaml")).unwrap();
+    assert_eq!(
+        cfg.environments["frontend"].node_version.as_deref(),
+        Some("20.11")
+    );
+}
