@@ -71,11 +71,12 @@ fn try_mise(version_spec: &str) -> Option<PathBuf> {
         .ok()?;
     let stdout = String::from_utf8_lossy(&out.stdout);
 
-    // Lines look like: "node  20.11.0  ..." — pick column index 1
+    // Lines look like: "node  20.11.0  ..." — pick column index 1, find highest match
     let matched = stdout
         .lines()
         .filter_map(|l| l.split_whitespace().nth(1))
-        .find(|v| version_matches(v, version_spec))?
+        .filter(|v| version_matches(v, version_spec))
+        .max_by(|a, b| compare_version_strings(a, b))?
         .to_string();
 
     let out = Command::new("mise")
@@ -97,18 +98,21 @@ fn try_fnm(version_spec: &str) -> Option<PathBuf> {
     // or legacy ~/.fnm/node-versions/ on some systems.
     // Check FNM_DIR env var first (XDG_DATA_HOME compliance).
     let home = dirs_next::home_dir()?;
-    let fnm_base = std::env::var("FNM_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            std::env::var("XDG_DATA_HOME")
-                .map(|xdg| PathBuf::from(xdg).join("fnm"))
-                .unwrap_or_else(|_| home.join(".local").join("share").join("fnm"))
-        });
+    let fnm_dir_from_env = std::env::var("FNM_DIR").ok().map(PathBuf::from);
 
-    for base in &[
-        fnm_base.join("node-versions"),
-        home.join(".fnm").join("node-versions"),  // legacy fallback
-    ] {
+    let fnm_base = fnm_dir_from_env.clone().unwrap_or_else(|| {
+        std::env::var("XDG_DATA_HOME")
+            .map(|xdg| PathBuf::from(xdg).join("fnm"))
+            .unwrap_or_else(|_| home.join(".local").join("share").join("fnm"))
+    });
+
+    // Only include legacy ~/.fnm path when FNM_DIR is not explicitly set.
+    let mut bases = vec![fnm_base.join("node-versions")];
+    if fnm_dir_from_env.is_none() {
+        bases.push(home.join(".fnm").join("node-versions"));
+    }
+
+    for base in &bases {
         if !base.exists() { continue; }
 
         // FIX: use `else { continue }` not `?` — avoids early return skipping second base.
