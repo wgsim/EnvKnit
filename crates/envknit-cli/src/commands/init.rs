@@ -16,6 +16,7 @@ pub fn run(env: String, backend: Option<String>) -> Result<()> {
         dev_packages: vec![],
         backend,
         python_version: None,
+        node_version: None,
     });
 
     let config = Config {

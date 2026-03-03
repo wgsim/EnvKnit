@@ -47,6 +47,8 @@ pub struct EnvironmentConfig {
     pub backend: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub python_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node_version: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -167,6 +169,7 @@ mod tests {
             dev_packages: vec![],
             backend: None,
             python_version: None,
+            node_version: None,
         });
         let cfg = Config { envknit_version: Some("0.1.0".to_string()), environments: envs };
         cfg.save(&path).unwrap();
@@ -221,5 +224,18 @@ mod tests {
         let pkgs = &cfg.environments["default"].packages;
         assert_eq!(pkgs[0].name, "numpy");
         assert_eq!(pkgs[0].version.as_deref(), Some(">=1.24"));
+    }
+
+    #[test]
+    fn test_node_version_round_trips() {
+        let dir = tmpdir("node_ver");
+        let yaml = "environments:\n  frontend:\n    node_version: '20.11'\n    packages: []\n";
+        let path = dir.join(CONFIG_FILE);
+        std::fs::write(&path, yaml).unwrap();
+        let cfg = Config::load(&path).unwrap();
+        assert_eq!(
+            cfg.environments["frontend"].node_version.as_deref(),
+            Some("20.11")
+        );
     }
 }

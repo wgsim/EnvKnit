@@ -17,6 +17,7 @@ pub fn run(name: String, backend: Option<String>) -> Result<()> {
         dev_packages: vec![],
         backend,
         python_version: None,
+        node_version: None,
     });
 
     config.save(&config_path)?;

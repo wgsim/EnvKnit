@@ -9,7 +9,7 @@ pub fn run(package: String, env: String, _backend: Option<String>, dev: bool) ->
 
     let mut config = Config::load(&config_path)?;
     let env_config = config.environments.entry(env.clone())
-        .or_insert_with(|| EnvironmentConfig { packages: vec![], dev_packages: vec![], backend: None, python_version: None });
+        .or_insert_with(|| EnvironmentConfig { packages: vec![], dev_packages: vec![], backend: None, python_version: None, node_version: None });
 
     let spec = PackageSpec::parse(&package);
     let target = if dev { &mut env_config.dev_packages } else { &mut env_config.packages };
