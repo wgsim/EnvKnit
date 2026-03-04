@@ -32,9 +32,6 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      - name: Install system dependencies (Ubuntu)
-        run: sudo apt-get install -y pkg-config libssl-dev
-
       - name: Run tests
         run: cargo test --manifest-path crates/envknit-cli/Cargo.toml
 
@@ -89,14 +86,10 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      - name: Install system dependencies (Ubuntu / glibc)
-        if: runner.os == 'Linux' && matrix.target == 'x86_64-unknown-linux-gnu'
-        run: sudo apt-get install -y pkg-config libssl-dev
-
-      - name: Install system dependencies (Ubuntu / musl)
+      - name: Install musl tools (Ubuntu / musl target)
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: |
-          sudo apt-get install -y musl-tools pkg-config
+          sudo apt-get install -y musl-tools
           rustup target add x86_64-unknown-linux-musl
 
       - name: Add macOS cross-compile target (arm64)
