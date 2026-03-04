@@ -92,9 +92,11 @@ jobs:
           sudo apt-get install -y musl-tools
           rustup target add x86_64-unknown-linux-musl
 
-      - name: Add macOS cross-compile target (arm64)
-        if: matrix.target == 'aarch64-apple-darwin'
-        run: rustup target add aarch64-apple-darwin
+      - name: Add macOS cross-compile targets
+        if: runner.os == 'macOS'
+        run: |
+          rustup target add aarch64-apple-darwin
+          rustup target add x86_64-apple-darwin
 
       - name: Build release binary
         run: >
@@ -103,7 +105,7 @@ jobs:
           --target ${{ matrix.target }}
 
       - name: Smoke test (native Linux/macOS)
-        if: runner.os != 'Windows' && matrix.target != 'aarch64-apple-darwin'
+        if: runner.os != 'Windows' && matrix.target != 'aarch64-apple-darwin' && matrix.target != 'x86_64-apple-darwin'
         run: |
           "${{ matrix.binary_path }}" --version
           "${{ matrix.binary_path }}" --help
