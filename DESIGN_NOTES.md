@@ -357,8 +357,8 @@ Based on review feedback: **do not hide the IPC boundary**. Users should know wh
 
 ```python
 # Option A: explicit remote boundary (recommended)
-async with envknit.worker("numpy", "1.26.4") as np:
-    result = await np.zeros(1000)        # clearly async, clearly remote
+with envknit.worker("numpy", "1.26.4") as np:
+    result = np.zeros(1000)              # sync subprocess call, clearly remote
 
 # Option B: transparent proxy (ergonomic but dangerous)
 with envknit.use("numpy", "1.26.4"):
