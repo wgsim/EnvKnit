@@ -72,7 +72,7 @@ impl Resolver {
                     backtracks += 1;
 
                     // Remove the conflicting package and bump its version index
-                    state.resolved.remove(&name_key);
+                    state.resolved.shift_remove(&name_key);
                     let idx = state.version_index.entry(name_key.clone()).or_insert(0);
                     *idx += 1;
 
@@ -82,7 +82,7 @@ impl Resolver {
                     let dependents: Vec<PackageSpec> = state.dependents_of(&name_key);
                     for dep in dependents {
                         let dep_key = normalize_name(&dep.name);
-                        state.resolved.remove(&dep_key);
+                        state.resolved.shift_remove(&dep_key);
                         state.pending.push(dep);
                     }
                 }
@@ -480,7 +480,7 @@ pub fn parse_requires_dist(dep: &str) -> Option<PackageSpec> {
                 }
             }
         }
-        if let Some((pos, op_len)) = split_pos {
+        if let Some((pos, _op_len)) = split_pos {
             let name = base[..pos].trim().to_string();
             // Include the operator in the constraint string
             let constraint = base[pos..].trim().to_string();
