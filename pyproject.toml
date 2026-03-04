@@ -57,14 +57,10 @@ dev = [
     "types-PyYAML>=6.0.0",
 ]
 
-[project.scripts]
-# Requires envknit[cli] extras (click, rich, pyyaml)
-envknit = "envknit.cli.main:app"
-
 [project.urls]
-Homepage = "https://github.com/envknit/envknit"
-Documentation = "https://github.com/envknit/envknit#readme"
-Repository = "https://github.com/envknit/envknit"
+Homepage = "https://github.com/wgsim/EnvKnit"
+Documentation = "https://github.com/wgsim/EnvKnit/tree/main/docs"
+Repository = "https://github.com/wgsim/EnvKnit"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/envknit"]
