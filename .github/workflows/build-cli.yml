@@ -114,8 +114,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          & ".\target\release\envknit.exe" --version
-          & ".\target\release\envknit.exe" --help
+          & "${{ matrix.binary_path }}" --version
+          & "${{ matrix.binary_path }}" --help
 
       - name: Rename artifact
         shell: bash
