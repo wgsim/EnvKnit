@@ -74,6 +74,7 @@ Thumbs.db
 .envknit/
 envknit-lock.yaml
 *.lock
+!Cargo.lock
 
 # mypy
 .mypy_cache/
