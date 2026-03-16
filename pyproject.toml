@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "envknit"
-version = "0.1.0"
+version = "0.1.1"
 description = "Multi-environment package manager for Python with dependency isolation"
 readme = "README.md"
 license = {text = "MIT"}
