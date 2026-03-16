@@ -12,7 +12,6 @@ jobs:
     runs-on: ubuntu-latest
 
     permissions:
-      id-token: write   # for OIDC trusted publishing (alternative to token)
       contents: read
 
     steps:
@@ -31,7 +30,5 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        # Uses OIDC trusted publishing — no token needed if configured on PyPI.
-        # Fallback: set PYPI_TOKEN secret and uncomment below.
-        # with:
-        #   password: ${{ secrets.PYPI_TOKEN }}
+        with:
+          password: ${{ secrets.PYPI_TOKEN }}
