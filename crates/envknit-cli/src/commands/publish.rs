@@ -36,10 +36,31 @@ pub fn run(repository: String, dry_run: bool) -> Result<()> {
     println!("{} Build complete.", "✓".green());
 
     // Step 2: twine upload
+    // Enumerate dist/ explicitly — std::process::Command does not use a shell,
+    // so "dist/*" would be passed as a literal string and twine would find nothing.
     println!("{} Uploading to '{}'...", "→".cyan(), repository);
 
+    let dist_files: Vec<_> = std::fs::read_dir("dist")
+        .context("Failed to read dist/ directory")?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            matches!(
+                p.extension().and_then(|s| s.to_str()),
+                Some("whl") | Some("gz") | Some("zip")
+            )
+        })
+        .collect();
+
+    if dist_files.is_empty() {
+        bail!("No distribution files found in dist/. Did the build step produce output?");
+    }
+
     let twine_status = std::process::Command::new(&twine_cmd)
-        .args(["upload", "--repository", &repository, "dist/*"])
+        .arg("upload")
+        .arg("--repository")
+        .arg(&repository)
+        .args(&dist_files)
         .status()
         .with_context(|| "Failed to run twine upload")?;
 
