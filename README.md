@@ -2,24 +2,13 @@
 
 **Multi-version Python package manager** — isolate environments, lock dependencies, and run multiple package versions side by side.
 
----
-
-## Quick Start
-
-```bash
-envknit init                              # creates envknit.yaml
-envknit add "requests>=2.28"
-envknit add "numpy>=1.24,<2.0" --env ml
-envknit lock                              # creates envknit.lock.yaml
-envknit install                           # installs to ~/.envknit/packages/
-envknit run -- python -m pytest
-```
+> **Two components:** EnvKnit consists of a **Rust CLI binary** (handles dependency resolution and installation) and a **Python library** (provides `use()`, `worker()` API for in-process version isolation). Both are needed for full functionality.
 
 ---
 
 ## Installation
 
-**CLI** — download the standalone binary from the [Releases page](https://github.com/wgsim/EnvKnit/releases):
+**Step 1 — CLI binary** (required for `envknit init/lock/install/run`):
 
 ```bash
 # Linux
@@ -31,10 +20,25 @@ curl -L https://github.com/wgsim/EnvKnit/releases/latest/download/envknit-macos-
 chmod +x envknit && sudo mv envknit /usr/local/bin/
 ```
 
-**Library:**
+Other platforms: see the [Releases page](https://github.com/wgsim/EnvKnit/releases).
+
+**Step 2 — Python library** (required for `use()`, `worker()` API):
 
 ```bash
 pip install envknit       # requires Python 3.10+
+```
+
+---
+
+## Quick Start
+
+```bash
+envknit init                              # creates envknit.yaml
+envknit add "requests>=2.28"
+envknit add "numpy>=1.24,<2.0" --env ml
+envknit lock                              # creates envknit.lock.yaml
+envknit install                           # installs to ~/.envknit/packages/
+envknit run -- python -m pytest
 ```
 
 ---
