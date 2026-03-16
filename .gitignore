@@ -79,6 +79,15 @@ envknit-lock.yaml
 *.lock
 !Cargo.lock
 
+# Security — never commit private keys or certificates
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Node.js (VS Code extension)
+node_modules/
+
 # mypy
 .mypy_cache/
 .dmypy.json
