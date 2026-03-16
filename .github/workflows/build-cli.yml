@@ -47,7 +47,7 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact_name: envknit-linux-amd64
-            binary_path: target/release/envknit
+            binary_path: target/x86_64-unknown-linux-gnu/release/envknit
           # Linux amd64 (musl — portable, no glibc dep)
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
@@ -57,7 +57,7 @@ jobs:
           - os: macos-latest
             target: x86_64-apple-darwin
             artifact_name: envknit-macos-amd64
-            binary_path: target/release/envknit
+            binary_path: target/x86_64-apple-darwin/release/envknit
           # macOS arm64 (Apple Silicon)
           - os: macos-latest
             target: aarch64-apple-darwin
@@ -67,7 +67,7 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact_name: envknit-windows-amd64.exe
-            binary_path: target/release/envknit.exe
+            binary_path: target/x86_64-pc-windows-msvc/release/envknit.exe
 
     steps:
       - name: Checkout
