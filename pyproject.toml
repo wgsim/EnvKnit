@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "envknit"
 version = "0.1.1"
-description = "Multi-environment package manager for Python with dependency isolation"
+description = "Multi-version Python package manager and dependency isolation tool"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
@@ -13,11 +13,12 @@ authors = [
     { name = "EnvKnit Team" }
 ]
 keywords = [
-    "environment",
+    "environment-manager",
     "package-manager",
-    "dependency",
+    "dependency-management",
     "isolation",
-    "conda",
+    "rust",
+    "developer-tools",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
