@@ -5,28 +5,28 @@
 [![Python API](https://img.shields.io/badge/API-Python_3.10+-blue.svg)](https://www.python.org/)
 [![CI](https://github.com/wgsim/EnvKnit/actions/workflows/test.yml/badge.svg)](https://github.com/wgsim/EnvKnit/actions)
 
-> **Next-generation Python package manager and multi-version dependency isolation tool.**
+> **Multi-version Python package manager and dependency isolation tool.**
 
-EnvKnit rethinks Python environment management. Instead of isolated, heavy virtual environments (`venv`) that restrict you to one version of a package per project, EnvKnit uses a **global package store** and a **custom import hook**. 
+EnvKnit provides an alternative to traditional virtual environments (`venv`) by using a **global package store** and a **custom import hook**. This architecture allows you to run multiple versions of the same package concurrently within a single Python process.
 
-Powered by a blazing-fast **Rust CLI** and a powerful **Python API**, EnvKnit lets you do the impossible: **Run multiple versions of the same package side-by-side in the exact same Python process.**
-
----
-
-## ✨ Why EnvKnit?
-
-- **🧬 Multi-Version Coexistence**: Need to migrate an API? Test compatibility? You can load `requests==2.28` and `requests==2.31` simultaneously in different parts of your code.
-- **⚡ Rust-Powered Resolution**: The CLI is a standalone, ultra-fast Rust binary that resolves dependencies, generates deterministic `envknit.lock.yaml` files, and manages the global store.
-- **📦 Global Package Store**: Packages are installed once in `~/.envknit/packages/` and shared across all your projects. Say goodbye to duplicate downloads and massive project folders.
-- **🔒 Immutable Lockfiles**: Strict contract between the CLI and your Python code ensures zero runtime network calls or resolution surprises.
-- **🛠️ Node.js & Python Integration**: Natively respects `python_version` and `node_version` via integrations with tools like `mise`, `fnm`, and `pyenv`.
+EnvKnit consists of a **Rust CLI** for dependency resolution and a **Python API** for runtime isolation.
 
 ---
 
-## 🚀 Show, Don't Tell
+## ✨ Features
 
-### The Python API: Magic In-Process Isolation
-With the EnvKnit Python library, you can dynamically route imports to specific package versions using ContextVars. No subprocesses required for pure-Python packages!
+- **Multi-Version Coexistence**: Load different versions of the same package (e.g., `requests==2.28` and `requests==2.31`) simultaneously in different parts of your code.
+- **Rust-Based CLI**: Fast dependency resolution and installation, generating deterministic `envknit.lock.yaml` files.
+- **Global Package Store**: Packages are installed once in `~/.envknit/packages/` and shared across all projects, saving disk space.
+- **Immutable Lockfiles**: Strict contract between the CLI and the Python code; no network calls or resolution happens at runtime.
+- **Node.js & Python Integration**: Natively supports `python_version` and `node_version` configurations via tools like `mise`, `fnm`, and `pyenv`.
+
+---
+
+## 🚀 Examples
+
+### Python API: In-Process Isolation
+Use the Python library to route imports dynamically using `ContextVars`. This allows pure-Python packages to isolate versions per-task.
 
 ```python
 import envknit
@@ -44,13 +44,13 @@ async def fetch_new():
         import requests
         print(f"New API task: {requests.__version__}")
 
-# Both run concurrently, in the same process, using different package versions!
+# Both run concurrently, in the same process, using different package versions.
 asyncio.run(asyncio.gather(fetch_old(), fetch_new()))
 ```
-*(For C-extension packages like `numpy`, EnvKnit provides a seamless `envknit.worker()` API to run them in isolated subprocesses).*
+*(For C-extension packages like `numpy`, EnvKnit provides the `envknit.worker()` API to run them in isolated subprocesses).*
 
-### The Rust CLI: Elegant Environment Management
-No more activating and deactivating. Just define your environments and run.
+### Rust CLI: Environment Management
+Define your dependencies in `envknit.yaml` and run commands.
 
 ```bash
 # Initialize and add dependencies
