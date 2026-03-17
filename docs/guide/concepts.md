@@ -1,28 +1,49 @@
 # How EnvKnit Works
 
-## Architecture: Two Components, One Lock File
+## Architecture: Global Store vs Virtual Environments
 
-EnvKnit is split into two independent components that communicate exclusively through
-`envknit.lock.yaml` and the shared package store at `~/.envknit/packages/`:
+Unlike traditional virtual environments (`venv`) that copy/install packages redundantly per project, EnvKnit uses a global package store. This architectural choice is what unlocks multi-version coexistence.
 
+```mermaid
+graph TD
+    subaxis1(Traditional Virtual Environments)
+    subgraph "Project A (.venv/)"
+        A1[requests 2.28]
+        A2[pytest 7.4]
+    end
+    subgraph "Project B (.venv/)"
+        B1[requests 2.31]
+        B2[pytest 7.4]
+    end
+    
+    subaxis2(EnvKnit Architecture)
+    subgraph "Global Package Store (~/.envknit/packages/)"
+        S1[requests/2.28.2/]
+        S2[requests/2.31.0/]
+        S3[pytest/7.4.3/]
+    end
+    
+    P1(Project A) -. envknit.lock.yaml .-> S1
+    P1(Project A) -. envknit.lock.yaml .-> S3
+    
+    P2(Project B) -. envknit.lock.yaml .-> S2
+    P2(Project B) -. envknit.lock.yaml .-> S3
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  Rust CLI (envknit binary)                                      │
-│  Resolves, locks, installs packages. Runs subcommands.          │
-│  Writes: envknit.lock.yaml, ~/.envknit/packages/<name>/<ver>/   │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │  envknit.lock.yaml
-                               │  ~/.envknit/packages/
-┌──────────────────────────────▼──────────────────────────────────┐
-│  Python library (envknit package)                               │
-│  Routes imports. Reads lock file. Injects sys.meta_path hook.   │
-│  Never installs packages — reads only what the CLI installed.   │
-└─────────────────────────────────────────────────────────────────┘
+
+## Two Components, One Lock File
+
+EnvKnit is split into two independent components that communicate exclusively through `envknit.lock.yaml` and the shared package store:
+
+```mermaid
+flowchart TD
+    CLI[Rust CLI<br/>envknit binary] -->|Resolves & Installs| Store[(Global Store<br/>~/.envknit/packages/)]
+    CLI -->|Writes| Lock[envknit.lock.yaml]
+    Lock -->|Reads| PyLib[Python Library<br/>import envknit]
+    Store -->|Loads from| PyLib
+    PyLib -->|Injects| Hook[sys.meta_path hook]
 ```
 
-The CLI is a standalone Rust binary. It has no Python dependency. The Python library
-has no knowledge of how packages were resolved — it only consumes what the lock file
-declares and what the store contains.
+The CLI is a standalone Rust binary. It has no Python dependency. The Python library has no knowledge of how packages were resolved — it only consumes what the lock file declares and what the store contains.
 
 ---
 
