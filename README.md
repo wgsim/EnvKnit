@@ -1,11 +1,14 @@
 # 🧶 EnvKnit
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Status: Experimental](https://img.shields.io/badge/Status-Experimental-red.svg)](#)
 [![Rust CLI](https://img.shields.io/badge/CLI-Rust-orange.svg)](https://www.rust-lang.org/)
 [![Python API](https://img.shields.io/badge/API-Python_3.10+-blue.svg)](https://www.python.org/)
 [![CI](https://github.com/wgsim/EnvKnit/actions/workflows/test.yml/badge.svg)](https://github.com/wgsim/EnvKnit/actions)
 
 > **Multi-version Python package manager and dependency isolation tool.**
+
+> ⚠️ **EXPERIMENTAL:** EnvKnit intentionally bypasses Python's "one module per process" singleton rule to achieve in-process multi-version loading. While powerful for API migrations and utility scripting, it breaks traditional type checking (`isinstance`) across versions and does not isolate global states. **Use with caution in large, stateful frameworks.**
 
 EnvKnit provides an alternative to traditional virtual environments (`venv`) by using a **global package store** and a **custom import hook**. This architecture allows you to run multiple versions of the same package concurrently within a single Python process.
 
