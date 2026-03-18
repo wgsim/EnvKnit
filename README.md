@@ -6,68 +6,79 @@
 [![Python API](https://img.shields.io/badge/API-Python_3.10+-blue.svg)](https://www.python.org/)
 [![CI](https://github.com/wgsim/EnvKnit/actions/workflows/test.yml/badge.svg)](https://github.com/wgsim/EnvKnit/actions)
 
-> **Multi-version Python package manager and dependency isolation tool.**
+> **Multi-environment package manager for Python and Node.js.**
 
-> ⚠️ **EXPERIMENTAL:** EnvKnit intentionally bypasses Python's "one module per process" singleton rule to achieve in-process multi-version loading. While powerful for API migrations and utility scripting, it breaks traditional type checking (`isinstance`) across versions and does not isolate global states. **Use with caution in large, stateful frameworks.**
+EnvKnit provides a modern alternative to traditional virtual environments (`venv`). Instead of creating redundant environment folders for every project, EnvKnit uses a **blazing-fast Rust CLI** to resolve dependencies and stores all packages in a **single global store**.
 
-EnvKnit provides an alternative to traditional virtual environments (`venv`) by using a **global package store** and a **custom import hook**. This architecture allows you to run multiple versions of the same package concurrently within a single Python process.
-
-EnvKnit consists of a **Rust CLI** for dependency resolution and a **Python API** for runtime isolation.
+With one `envknit.yaml`, you can cleanly define and switch between multiple, isolated environments (e.g., `default`, `ml`, `frontend`) without the overhead of heavy virtual environments.
 
 ---
 
-## ✨ Features
+## ✨ Key Features
 
-- **Multi-Version Coexistence**: Load different versions of the same package (e.g., `requests==2.28` and `requests==2.31`) simultaneously in different parts of your code.
-- **Rust-Based CLI**: Fast dependency resolution and installation, generating deterministic `envknit.lock.yaml` files.
-- **Global Package Store**: Packages are installed once in `~/.envknit/packages/` and shared across all projects, saving disk space.
-- **Immutable Lockfiles**: Strict contract between the CLI and the Python code; no network calls or resolution happens at runtime.
-- **Node.js & Python Integration**: Natively supports `python_version` and `node_version` configurations via tools like `mise`, `fnm`, and `pyenv`.
+- **Multi-Environment Management**: Define multiple environments in a single project. Switch seamlessly between a `default` backend env and an `ml` env with different dependencies.
+- **Global Package Store**: Packages are installed exactly once in `~/.envknit/packages/` and shared across all projects. Say goodbye to gigabytes of duplicated `.venv` folders.
+- **Unified Toolchain**: Natively respects `python_version` and `node_version` configurations via integrations with tools like `mise`, `fnm`, and `pyenv`.
+- **Rust-Powered CLI**: Ultra-fast dependency resolution and deterministic `envknit.lock.yaml` generation.
+- **Transparent Execution**: Run tools with `envknit run -- <command>` to automatically inject the correct environment paths into `PYTHONPATH` or `PATH`.
 
 ---
 
-## 🚀 Examples
+## 🚀 Quick Start
 
-### Python API: In-Process Isolation
-Use the Python library to route imports dynamically using `ContextVars`. This allows pure-Python packages to isolate versions per-task.
+### 1. Define Environments
+Create an `envknit.yaml` to define your project's environments.
+
+```bash
+envknit init
+
+# Add to the default environment
+envknit add "fastapi>=0.100"
+
+# Add to a specialized 'ml' environment
+envknit add "torch>=2.0" --env ml
+envknit add "numpy>=1.24,<2.0" --env ml
+```
+
+### 2. Lock and Install
+Resolve dependencies and install them to the global store.
+
+```bash
+envknit lock
+envknit install
+```
+
+### 3. Run Your Code
+Execute your scripts in the context of a specific environment.
+
+```bash
+# Runs with 'default' environment packages injected into PYTHONPATH
+envknit run -- python app.py
+
+# Runs tests skipping dev dependencies
+envknit run --no-dev -- python -m pytest
+
+# Runs a training script using the isolated 'ml' environment
+envknit run --env ml -- python train.py
+```
+
+---
+
+## ⚠️ Advanced Feature: In-Process Isolation (Experimental)
+
+> **EXPERIMENTAL:** EnvKnit intentionally bypasses Python's "one module per process" singleton rule. While powerful for API migrations, it breaks traditional type checking (`isinstance`) across versions. **Use with caution.**
+
+Beyond standard environment management, EnvKnit provides a Python library for edge-case dependency conflicts. You can use `ContextVars` to dynamically route imports, allowing you to run multiple versions of the same pure-Python package concurrently in a single script.
 
 ```python
 import envknit
-import asyncio
 
-async def fetch_old():
-    # Force this specific task to use an older version of requests
-    with envknit.use("requests", "2.28.2"):
-        import requests
-        print(f"Old API task: {requests.__version__}")
-
-async def fetch_new():
-    # This task uses the default locked version, or another override
-    with envknit.use("requests", "2.31.0"):
-        import requests
-        print(f"New API task: {requests.__version__}")
-
-# Both run concurrently, in the same process, using different package versions.
-asyncio.run(asyncio.gather(fetch_old(), fetch_new()))
+# Route imports to a specific version for this block only
+with envknit.use("requests", "2.28.2"):
+    import requests
+    print(requests.__version__)
 ```
-*(For C-extension packages like `numpy`, EnvKnit provides the `envknit.worker()` API to run them in isolated subprocesses).*
-
-### Rust CLI: Environment Management
-Define your dependencies in `envknit.yaml` and run commands.
-
-```bash
-# Initialize and add dependencies
-envknit init
-envknit add "requests>=2.28"
-envknit add "numpy>=1.24,<2.0" --env ml
-
-# Resolve dependencies and install to the global store
-envknit lock
-envknit install
-
-# Run tools with automatic PYTHONPATH injection
-envknit run -- python -m pytest
-```
+*(For C-extension packages like `numpy`, EnvKnit provides the `envknit.worker()` API to isolate them in subprocesses).*
 
 ---
 
