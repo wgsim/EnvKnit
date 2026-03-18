@@ -97,4 +97,4 @@ dmypy.json
 .ruff_cache/
 .claude/
 /target/
-\nIN_PROCESS_CHALLENGES.md
+\ndocs/GEN2_ARCHITECTURE_PLAN.md

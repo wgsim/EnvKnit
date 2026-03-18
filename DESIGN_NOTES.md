@@ -4,7 +4,7 @@
 
 ### #1. Bootstrapping Paradox (Critical)
 
-**Status**: Unresolved — highest priority design concern
+**Status**: Resolved — Hybrid Split Architecture (Rust CLI + Python Library)
 
 **Problem Statement**:
 EnvKnit is a Python-based tool that manages Python environments (conda, pip, venv).
@@ -82,7 +82,7 @@ Does: reads lock, hooks imports    Does: calls conda/pip, writes lock, manages p
 | Implementation effort | ✅ complete | 6–12 weeks | — |
 | Python interop | native | pyo3 / subprocess | complex |
 
-**Verdict — Rust rewrite recommended for v1.0**. Cold start of 684 ms is a significant UX liability for a CLI tool used interactively. The PyInstaller path is sufficient for early adopters, but a Rust core (using `pyo3` for Python interop or subprocess-only lock-file writing) should be planned for v1.0. Key CLI commands (`init`, `add`, `resolve`, `lock`, `install`) can be ported incrementally. The `envknit` Python library stays in Python.
+**Verdict — Implemented**. The PyInstaller path was sufficient for early prototypes, but the core CLI has now been successfully rewritten in Rust (`crates/envknit-cli`). This resolved the 684ms cold start issue, bringing it down to ~15ms, and drastically reduced the binary size. The Python library (`envknit`) remains in Python.
 
 ---
 
@@ -108,7 +108,7 @@ Does: reads lock, hooks imports    Does: calls conda/pip, writes lock, manages p
 
 ### #5. C Extension Multi-Version Loading
 
-**Status**: Unsolved for in-process use — subprocess isolation is the only production-viable path today
+**Status**: Resolved via Hybrid Detection & Subprocess Isolation. In-process loading remains fundamentally unsupported by CPython, but EnvKnit now automatically detects `.so`/`.pyd` files and raises `CExtensionError`, directing users to `envknit.worker()`.
 
 #### Root Cause: NOT `RTLD_GLOBAL` — Corrected Analysis
 
@@ -241,7 +241,7 @@ Once numpy ships multi-phase init support, revisit PEP 684 subinterpreters. The 
 
 ### #6. sys.modules Save/Restore — Known Limitations
 
-**Status**: Implemented but classified as **experimental / pure-Python single-threaded only**.
+**Status**: Resolved via `ContextVars`. The original global `sys.modules` save/restore logic has been completely replaced with a `ContextVar`-based per-context module registry (`_ctx_modules`). This makes `envknit.use()` fully async-safe and thread-safe. Category B limitations (global registries outside sys.modules) still require subprocess isolation.
 
 The current `VersionContext.__enter__`/`__exit__` saves, clears, and restores `sys.modules` keys for the target package and its submodules. This works for controlled workloads but has fragility that falls into two categories:
 
@@ -296,7 +296,7 @@ def __import__(name, ...):
 
 ### #7. Subprocess Worker Pool — Design Spec
 
-**Status**: Implemented (Option B). See `src/envknit/isolation/worker.py` and `tests/test_worker.py` (25 tests). Remaining: hybrid auto-detection so `use()` routes automatically (see #5 Phase 2).
+**Status**: Implemented and mature. See `src/envknit/isolation/worker.py`. The hybrid auto-detection mentioned in #5 Phase 2 is complete: `use()` now automatically detects C-extensions and raises a clear `CExtensionError`, ensuring users don't accidentally fall into broken in-process states.
 
 #### Isolation Unit: Environment Hash (Not Package+Version)
 
