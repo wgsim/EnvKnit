@@ -222,25 +222,44 @@ Use `envknit.worker()` for C extension packages. See [Python API Guide](python-a
 
 ---
 
-## Known Limitations
+## Known Limitations & The Road Ahead
 
-### C Extension In-Process Loading
+EnvKnit's "In-process multi-version loading" (via `sys.meta_path` and `ContextVars`) provides unprecedented flexibility, but it fundamentally hacks Python's "one module per process" assumption. This creates several "Soft Isolation" limitations.
 
-Multiple versions of a C extension package (numpy, pandas, pydantic with Rust core,
-etc.) cannot coexist in the same process. `envknit.use()` raises `CExtensionError` for
-these packages. Use `envknit.worker()` instead, which runs each version in a separate
-subprocess with its own C extension state.
+### 1. Type Checking and Object Compatibility
+Classes are identified by memory addresses. A `Response` class loaded from `requests v1` and another from `requests v2` are treated as completely different types.
+- **Symptom:** `isinstance(obj_from_v1, requests_v2.Response)` evaluates to `False`. This breaks frameworks relying on strict type checking (like Pydantic).
+- **Workaround:** Rely on Duck Typing and structural subtyping (`typing.Protocol`) across version boundaries.
 
-### Global State Packages
+### 2. Global State and Singleton Contamination
+While EnvKnit isolates the module routing, it **does not isolate Python's built-in objects**.
+- **Symptom:** If two versions of a package modify `logging` handlers, mutate `sys.modules`, or register themselves in a global singleton (e.g., SQLAlchemy's `MetaData`), they will overwrite each other's state.
 
-Some pure-Python packages register global state on first import (e.g., registries,
-plugins, signal handlers). `envknit.use()` removes modules from the context cache on
-exit but cannot undo side effects on global objects like `logging` handlers or
-`urllib3` connection pools. For these packages, `envknit.worker()` provides stronger
-isolation.
+### 3. The Serialization (Pickle) Nightmare
+Python's `pickle` stores the literal import path of a class alongside its data.
+- **Symptom:** Serializing an object in a `v1` context and deserializing it in a `default` context leads to class mismatch errors.
+- **Workaround:** Never use `pickle` across version boundaries. Convert objects to basic DTOs (JSON, dictionaries) before passing them.
 
-### PATH-based Tool Invocation
+### 4. C-Extension In-Process Loading
+Packages with `.so` or `.pyd` files (NumPy, Pandas, etc.) are loaded by the OS dynamic linker (`dlopen`), making in-process multi-versioning impossible.
+- **Workaround:** EnvKnit forces the use of `envknit.worker()` (subprocess isolation) for these packages, which introduces IPC serialization overhead.
 
-Because `pip install --target` does not create `bin/` entry points, command-line tools
-installed by pip (pytest, black, mypy, ruff, etc.) cannot be invoked by name. Use
-`python -m <tool>` instead. See [Running CLI Tools](cli-scripts.md).
+---
+
+## 🎯 Sweet Spots (When to use EnvKnit)
+Given these limitations, EnvKnit is not a silver bullet for every project. It shines in:
+1. **API Migrations:** Incrementally migrating hundreds of endpoints from an old SDK to a new one without splitting microservices.
+2. **Plugin Systems:** Loading third-party plugins that require conflicting dependency versions.
+3. **CLI / Utility Scripting:** Running conflicting dev tools or testing matrices side-by-side.
+
+*Do not use in-process isolation for heavy data-science pipelines (NumPy/Pandas) or frameworks that heavily mutate global state.*
+
+---
+
+## 🚀 The Gen 2 Roadmap: Towards "Hard Isolation"
+EnvKnit currently uses "Soft Isolation" (faking module caches). To solve the Global State and C-Extension problems permanently, the future roadmap targets **"Hard Isolation"**.
+
+**The Plan: Python 3.12+ Sub-interpreters (PEP 684)**
+By evolving the backend to leverage C-API level Per-Interpreter GILs, EnvKnit will be able to spawn true sub-interpreters instead of relying on `ContextVars`. 
+- Each sub-interpreter will have its own strictly isolated `sys.modules`, `logging` state, and memory space.
+- Combined with Multi-phase initialization (PEP 489), this will eventually allow C-Extensions to be loaded safely into the same process memory space without colliding.
