@@ -16,9 +16,9 @@
 
 ## Phase 3: Module Routing and Lockfile integration
 *Goal: Connect the sub-interpreter backend to EnvKnit's existing lockfile and global store.*
-- [ ] Modify the sub-interpreter's initialization sequence to parse `envknit.lock.yaml`.
-- [ ] Inject the correct `install_path` values into the sub-interpreter's `sys.path`.
-- [ ] Ensure that `envknit.isolate()` dynamically selects the correct environment configuration based on the requested `env_name` or `package/version` combo.
+- [x] Modify the sub-interpreter's initialization sequence to parse `envknit.lock.yaml`.
+- [x] Inject the correct `install_path` values into the sub-interpreter's `sys.path`.
+- [x] Ensure that `envknit.isolate()` dynamically selects the correct environment configuration based on the requested `env_name` or `package/version` combo.
 
 ## Phase 4: C-Extension Evaluation (PEP 489)
 *Goal: Identify which C-extensions can now be safely loaded without the subprocess worker.*
