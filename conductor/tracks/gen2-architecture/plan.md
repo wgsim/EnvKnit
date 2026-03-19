@@ -9,10 +9,10 @@
 
 ## Phase 2: Core Sub-interpreter Integration (Gen 2.0 Alpha)
 *Goal: Prove the viability of PEP 684 Sub-interpreters for package isolation.*
-- [x] Evaluate `_xxsubinterpreters` (Python 3.12 built-in) or third-party wrappers (like `interpreters` from PyPI) for spawning sub-interpreters.
-- [x] Create a prototype `envknit.isolate(env_name)` context manager.
-- [x] Implement IPC or shared memory channels to pass simple scalar data (DTOs) between the main interpreter and the sub-interpreter.
-- [x] Write integration tests proving that modifying `logging.getLogger()` in the sub-interpreter does not affect the main interpreter.
+- [ ] Evaluate `_xxsubinterpreters` (Python 3.12 built-in) or third-party wrappers (like `interpreters` from PyPI) for spawning sub-interpreters.
+- [ ] Create a prototype `envknit.isolate(env_name)` context manager.
+- [ ] Implement IPC or shared memory channels to pass simple scalar data (DTOs) between the main interpreter and the sub-interpreter.
+- [ ] Write integration tests proving that modifying `logging.getLogger()` in the sub-interpreter does not affect the main interpreter.
 
 ## Phase 3: Module Routing and Lockfile integration
 *Goal: Connect the sub-interpreter backend to EnvKnit's existing lockfile and global store.*
