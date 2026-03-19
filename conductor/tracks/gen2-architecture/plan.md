@@ -28,6 +28,6 @@
 
 ## Phase 5: Documentation and Release
 *Goal: Educate users on the architectural shift and boundary constraints.*
-- [ ] Publish a migration guide from `envknit.use()` (Soft Isolation) to `envknit.isolate()` (Hard Isolation).
-- [ ] Add extensive documentation on serialization limits (`pickle` vs JSON/DTOs).
-- [ ] Add explicit examples of using `typing.Protocol` to bypass `isinstance` checks across interpreter boundaries.
+- [x] Publish a migration guide from `envknit.use()` (Soft Isolation) to `envknit.isolate()` (Hard Isolation).
+- [x] Add extensive documentation on serialization limits (`pickle` vs JSON/DTOs).
+- [x] Add explicit examples of using `typing.Protocol` to bypass `isinstance` checks across interpreter boundaries.
