@@ -124,6 +124,7 @@ Dive deeper into how EnvKnit works and how to integrate it into your workflow.
 | 🐍 [**Python Version**](docs/guide/python-version.md) | Using `python_version` with `mise`/`pyenv`. |
 | 🟢 [**Node Version**](docs/guide/node-version.md) | Using `node_version` with `fnm`/`nvm`/`mise`. |
 | 🔌 [**Python API**](docs/guide/python-api.md) | Deep dive into `use()`, `worker()`, and `configure_from_lock()`. |
+| 🛡️ [**Gen 2 Hard Isolation**](docs/guide/gen2-isolation.md) | Using Python 3.12+ Sub-interpreters for strict global state isolation. |
 | 🌍 [**Environments**](docs/guide/environments.md) | Managing multiple environments (`default`, `ml`, `dev`). |
 | ⚙️ [**CI Integration**](docs/guide/ci.md) | Setting up EnvKnit in GitHub Actions. |
 | 🛠️ [**Troubleshooting & FAQ**](docs/guide/troubleshooting.md) | Solutions for common errors, C-extensions, and CLI path issues. |
