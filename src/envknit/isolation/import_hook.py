@@ -22,8 +22,6 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from envknit.isolation.patch import patch_thread_context, unpatch_thread_context
-
 # Per-context (per asyncio.Task / per thread) version mapping.
 # Maps normalized_package_name -> version string.
 # Each Task/thread gets its own independent copy — reads and writes in one
@@ -956,21 +954,19 @@ class ImportHookManager:
         return cls._instance
 
     def install(self, strict: bool = False) -> None:
-        """Install the import hook in sys.meta_path and patch threading."""
+        """Install the import hook in sys.meta_path."""
         if not self._installed:
             self.finder.strict_mode = strict
             sys.meta_path.insert(0, self.finder)
             self._installed = True
-            patch_thread_context()
-            logger.info("Import hook and thread context patches installed")
+            logger.info("Import hook installed")
 
     def uninstall(self) -> None:
-        """Remove the import hook from sys.meta_path and unpatch threading."""
+        """Remove the import hook from sys.meta_path."""
         if self._installed and self.finder in sys.meta_path:
             sys.meta_path.remove(self.finder)
             self._installed = False
-            unpatch_thread_context()
-            logger.info("Import hook and thread context patches uninstalled")
+            logger.info("Import hook uninstalled")
 
     def is_installed(self) -> bool:
         """Check if the import hook is installed."""
