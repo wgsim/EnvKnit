@@ -22,9 +22,9 @@
 
 ## Phase 4: C-Extension Evaluation (PEP 489)
 *Goal: Identify which C-extensions can now be safely loaded without the subprocess worker.*
-- [x] Test loading single-phase initialization C-extensions inside the sub-interpreter (expected to fail in Python 3.12+).
-- [x] Build an automated detection fallback: If an extension is single-phase, gracefully fall back to the existing `envknit.worker()` (subprocess pool).
-- [x] Document which major libraries (e.g., standard library modules, specific data science tools) support PEP 489 and can run natively in the sub-interpreter.
+- [ ] Test loading single-phase initialization C-extensions inside the sub-interpreter (expected to fail in Python 3.12+).
+- [ ] Build an automated detection fallback: If an extension is single-phase, gracefully fall back to the existing `envknit.worker()` (subprocess pool).
+- [ ] Document which major libraries (e.g., standard library modules, specific data science tools) support PEP 489 and can run natively in the sub-interpreter.
 
 ## Phase 5: Documentation and Release
 *Goal: Educate users on the architectural shift and boundary constraints.*
