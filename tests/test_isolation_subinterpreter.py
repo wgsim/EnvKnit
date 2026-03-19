@@ -61,3 +61,43 @@ def test_subinterpreter_eval_json_ipc():
     assert isinstance(data, dict)
     assert data['status'] == 'isolated'
     assert 'platform' in data
+
+def test_subinterpreter_configure_from_lock(tmp_path):
+    """
+    Test that configuring a sub-interpreter from a lock file correctly
+    injects the environment's package paths into its sys.path.
+    """
+    import yaml
+    
+    lock_file = tmp_path / "envknit.lock.yaml"
+    fake_pkg_path = str(tmp_path / "fake_packages" / "mylib")
+    
+    # Create a minimal valid lock file structure
+    lock_data = {
+        "schema_version": "1.0",
+        "lock_generated_at": "2026-03-18T00:00:00Z",
+        "environments": {
+            "ml": [
+                {
+                    "name": "mylib",
+                    "version": "1.0.0",
+                    "install_path": fake_pkg_path,
+                    "source": "pypi"
+                }
+            ]
+        }
+    }
+    
+    with open(lock_file, "w") as f:
+        yaml.dump(lock_data, f)
+        
+    with SubInterpreterEnv("ml") as interp:
+        interp.configure_from_lock(str(lock_file), env_name="ml")
+        
+        # Verify the path was injected
+        data = interp.eval_json(
+            "import sys\n"
+            "result = {'path': sys.path}"
+        )
+        
+    assert fake_pkg_path in data['path'], f"Expected {fake_pkg_path} in sub-interpreter sys.path"

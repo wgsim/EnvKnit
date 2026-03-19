@@ -81,3 +81,31 @@ if 'result' in locals():
             if os.path.exists(temp_path):
                 os.remove(temp_path)
 
+    def configure_from_lock(self, lock_path: str, env_name: str = "default") -> None:
+        """
+        Parse the envknit lock file, extract install paths for the specified environment,
+        and inject them into the sub-interpreter's sys.path.
+        """
+        from envknit.core.lock import LockFile
+        from pathlib import Path
+        
+        lock = LockFile(Path(lock_path))
+        lock.load()
+        
+        envs = lock.environments
+        
+        # Fallback to checking the flat package list if environments are not explicitly mapped
+        # but the user requested 'default'
+        packages = []
+        if env_name in envs:
+            packages = envs[env_name]
+        elif env_name == "default" and not envs and lock.packages:
+            packages = list(lock.packages)
+        else:
+            raise ValueError(f"Environment '{env_name}' not found in lock file {lock_path}")
+            
+        paths = [pkg.install_path for pkg in packages if pkg.install_path]
+        
+        if paths:
+            self.run_string(f"import sys\nsys.path = {repr(paths)} + sys.path")
+
