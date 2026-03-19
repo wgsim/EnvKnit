@@ -19,6 +19,13 @@ except ImportError:
     _SUPPORTS_SUBINTERPRETERS = False
 
 
+class SubinterpreterCExtensionError(ImportError):
+    """
+    Raised when a C-extension fails to load in a sub-interpreter because it
+    only supports single-phase initialization (PEP 489).
+    """
+    pass
+
 class SubInterpreterEnv:
     """
     A context manager that spawns an isolated Python sub-interpreter.
@@ -49,6 +56,37 @@ class SubInterpreterEnv:
         if self.interp_id is None:
             raise RuntimeError("Sub-interpreter is not active.")
         _interpreters.run_string(self.interp_id, code)
+
+    def try_import(self, module_name: str) -> bool:
+        """
+        Attempt to import a module inside the sub-interpreter.
+        
+        Returns:
+            True if successful.
+            False if it fails with the specific C-extension single-phase error,
+            signaling that a fallback to a subprocess worker is required.
+            
+        Raises:
+            ImportError if the module simply cannot be found.
+        """
+        test_code = f"""
+import sys
+try:
+    import {module_name}
+    result = {{"status": "ok"}}
+except ImportError as e:
+    result = {{"status": "error", "msg": str(e), "type": "ImportError"}}
+except Exception as e:
+    result = {{"status": "error", "msg": str(e), "type": "Exception"}}
+"""
+        data = self.eval_json(test_code)
+        if data.get("status") == "error":
+            msg = data.get("msg", "")
+            if "does not support loading in subinterpreters" in msg or "cannot be loaded" in msg:
+                return False
+            raise ImportError(f"Failed to import {module_name} in subinterpreter: {msg}")
+            
+        return True
 
     def eval_json(self, code: str) -> Dict[str, Any]:
         """
