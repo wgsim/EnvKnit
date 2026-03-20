@@ -6,7 +6,17 @@ import threading
 
 import pytest
 
+from envknit.isolation.context_propagation import context_wrap
+
 _test_var: contextvars.ContextVar[str] = contextvars.ContextVar("_test_var", default="none")
+
+
+@pytest.fixture(autouse=True)
+def reset_test_var():
+    """Reset _test_var to default after each test to prevent state bleed."""
+    token = _test_var.set("none")
+    yield
+    _test_var.reset(token)
 
 
 def test_context_wrap_captures_current_context():
@@ -16,7 +26,6 @@ def test_context_wrap_captures_current_context():
     def worker():
         result["value"] = _test_var.get()
 
-    from envknit.isolation.context_propagation import context_wrap
     wrapped = context_wrap(worker)
     t = threading.Thread(target=wrapped)
     t.start()
@@ -34,7 +43,6 @@ def test_context_wrap_isolates_child_mutations():
         _test_var.set("child_mutation")
         result["child"] = _test_var.get()
 
-    from envknit.isolation.context_propagation import context_wrap
     wrapped = context_wrap(worker)
     t = threading.Thread(target=wrapped)
     t.start()
