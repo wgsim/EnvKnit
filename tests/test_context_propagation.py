@@ -6,7 +6,7 @@ import threading
 
 import pytest
 
-from envknit.isolation.context_propagation import context_wrap, ContextThread
+from envknit.isolation.context_propagation import context_wrap, ContextThread, ContextExecutor
 
 _test_var: contextvars.ContextVar[str] = contextvars.ContextVar("_test_var", default="none")
 
@@ -86,3 +86,37 @@ def test_context_thread_snapshots_at_init_time():
     t.join()
 
     assert result["value"] == "at_init"  # must be the value at init time
+
+
+def test_context_executor_inherits_context():
+    import concurrent.futures
+    _test_var.set("executor_parent")
+
+    def worker():
+        return _test_var.get()
+
+    with ContextExecutor(max_workers=1) as executor:
+        future = executor.submit(worker)
+        value = future.result()
+
+    assert value == "executor_parent"
+
+
+def test_context_executor_per_submit_snapshot():
+    """Each submit() snapshots the context at submit() call time."""
+    import concurrent.futures
+    results = {}
+
+    def worker(key: str) -> str:
+        return _test_var.get()
+
+    with ContextExecutor(max_workers=2) as executor:
+        _test_var.set("v1")
+        f1 = executor.submit(worker, "k1")
+        _test_var.set("v2")
+        f2 = executor.submit(worker, "k2")
+        results["k1"] = f1.result()
+        results["k2"] = f2.result()
+
+    assert results["k1"] == "v1"
+    assert results["k2"] == "v2"

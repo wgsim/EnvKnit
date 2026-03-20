@@ -58,3 +58,24 @@ class ContextThread(threading.Thread):
 
     def run(self) -> None:
         self._envknit_ctx.run(super().run)
+
+
+class ContextExecutor(concurrent.futures.ThreadPoolExecutor):
+    """
+    A ThreadPoolExecutor subclass that captures the ContextVar context at
+    each submit() call and restores it in the worker thread.
+
+    Drop-in replacement for ThreadPoolExecutor inside envknit.use() blocks.
+
+    Example::
+
+        with envknit.use("mylib", "2.0"):
+            with ContextExecutor(max_workers=4) as executor:
+                futures = [executor.submit(task, item) for item in items]
+    """
+
+    def submit(
+        self, fn: Callable[..., _T], /, *args: Any, **kwargs: Any
+    ) -> "concurrent.futures.Future[_T]":
+        ctx = contextvars.copy_context()
+        return super().submit(ctx.run, fn, *args, **kwargs)
