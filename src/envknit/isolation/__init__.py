@@ -29,6 +29,11 @@ from envknit.isolation.import_hook import (
     set_default,
     use,
 )
+from envknit.isolation.context_propagation import (
+    ContextExecutor,
+    ContextThread,
+    context_wrap,
+)
 from envknit.isolation.shim import (
     CLIShimGenerator,
     ShellIntegration,
@@ -64,6 +69,10 @@ __all__ = [
     "get_shim_generator",
     "get_shell_integration",
     "get_tool_dispatcher",
+    # Context propagation (opt-in)
+    "ContextThread",
+    "ContextExecutor",
+    "context_wrap",
     # Convenience functions - Import hooks
     "enable",
     "disable",
