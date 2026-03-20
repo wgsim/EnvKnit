@@ -1,0 +1,76 @@
+"""
+Tests for safe C-extension probing via SubInterpreterEnv.try_import().
+"""
+import sys
+import pytest
+
+try:
+    import _interpreters
+    _HAS_INTERPRETERS = True
+except ImportError:
+    _HAS_INTERPRETERS = False
+
+pytestmark = pytest.mark.skipif(
+    sys.version_info < (3, 12) or not _HAS_INTERPRETERS,
+    reason="Sub-interpreters require Python 3.12+ with _interpreters module"
+)
+
+from envknit.isolation.subinterpreter import SubInterpreterEnv, CExtIncompatibleError
+
+
+def test_try_import_stdlib_module_returns_true():
+    """stdlib 모듈은 True 반환."""
+    with SubInterpreterEnv("test") as interp:
+        assert interp.try_import("json") is True
+
+
+def test_try_import_cext_incompatible_returns_false():
+    """PEP 489 비호환 C-extension은 False 반환."""
+    with SubInterpreterEnv("test") as interp:
+        interp.run_string('''
+import sys
+class _FakeCExtLoader:
+    def find_spec(self, name, path, target=None):
+        if name == "fake_single_phase_cext":
+            import importlib.util
+            return importlib.util.spec_from_loader(name, self)
+    def create_module(self, spec):
+        raise ImportError(
+            f"module {spec.name} does not support loading in subinterpreters"
+        )
+    def exec_module(self, m): pass
+sys.meta_path.insert(0, _FakeCExtLoader())
+''')
+        result = interp.try_import("fake_single_phase_cext")
+
+    assert result is False
+
+
+def test_try_import_missing_module_raises_importerror():
+    """존재하지 않는 모듈은 ImportError 발생."""
+    with SubInterpreterEnv("test") as interp:
+        with pytest.raises(ImportError):
+            interp.try_import("_completely_nonexistent_module_xyz_123")
+
+
+def test_try_import_module_name_is_not_executed_as_code():
+    """
+    module_name이 Python 코드로 실행되지 않음을 확인 — 코드 인젝션 방어 검증.
+    crafted_name에 세미콜론과 실행 구문이 포함되어도 파일이 생성되지 않아야 한다.
+    """
+    import tempfile
+    import os
+    marker = tempfile.mktemp(suffix=".injection_test")
+
+    crafted_name = f"os; open({repr(marker)}, 'w').close()"
+
+    with SubInterpreterEnv("test") as interp:
+        try:
+            interp.try_import(crafted_name)
+        except (ImportError, Exception):
+            pass  # 오류는 허용 — 파일이 생성되면 안 됨
+
+    assert not os.path.exists(marker), \
+        "SECURITY: module name was executed as code (injection succeeded)"
+    if os.path.exists(marker):
+        os.unlink(marker)

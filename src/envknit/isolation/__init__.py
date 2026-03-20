@@ -34,6 +34,11 @@ from envknit.isolation.context_propagation import (
     ContextThread,
     context_wrap,
 )
+from envknit.isolation.subinterpreter import (
+    CExtIncompatibleError,
+    SubInterpreterEnv,
+    UnsupportedPlatformError,
+)
 from envknit.isolation.shim import (
     CLIShimGenerator,
     ShellIntegration,
@@ -65,6 +70,10 @@ __all__ = [
     # Manager
     "ImportHookManager",
     "VersionContext",
+    # Sub-interpreter strict isolation
+    "SubInterpreterEnv",
+    "UnsupportedPlatformError",
+    "CExtIncompatibleError",
     # Convenience functions - CLI
     "get_shim_generator",
     "get_shell_integration",
