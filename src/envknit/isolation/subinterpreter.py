@@ -34,9 +34,12 @@ class CExtIncompatibleError(ImportError):
     """
 
 
-# PEP 489 단일 초기화 모듈에 대해 CPython이 사용하는 정확한 오류 메시지
+# CPython이 PEP 489 단일 초기화(single-phase init) C-extension에 대해 사용하는 오류 메시지.
+# 버전 및 컨텍스트에 따라 문자열이 다를 수 있으므로 알려진 변형을 모두 포함.
 _CEXT_INCOMPATIBLE_MESSAGES = frozenset([
-    "does not support loading in subinterpreters",
+    "does not support loading in subinterpreters",   # 대부분의 C-ext (3.12+)
+    "cannot be imported in a subinterpreter",        # 일부 built-in 모듈 (3.12+)
+    "module does not support running in subinterpreters",  # _interpreters 채널 경로 (3.13)
 ])
 
 
@@ -52,11 +55,7 @@ def _get_stdlib_paths() -> list[str]:
         p = sysconfig.get_path(key)
         if p and Path(p).exists():
             paths.append(p)
-    # Always include the zip stdlib path (e.g. python312.zip)
-    zip_path = sysconfig.get_path("stdlib", vars={"platbase": "", "base": ""})
-    if zip_path and zip_path not in paths:
-        paths.append(zip_path)
-    return list(dict.fromkeys(p for p in paths if p))  # deduplicate, preserve order
+    return list(dict.fromkeys(paths))  # deduplicate, preserve order
 
 
 class SubInterpreterEnv:
@@ -122,7 +121,12 @@ class SubInterpreterEnv:
                 "if 'result' in dir():\n"
                 f"    open({repr(tmp)}, 'w').write(_json.dumps(result))\n"
             )
-            _interpreters.run_string(self.interp_id, wrapper)
+            # run_string returns an error namespace on failure (does not raise).
+            err = _interpreters.run_string(self.interp_id, wrapper)
+            if err is not None:
+                raise RuntimeError(
+                    f"Sub-interpreter execution failed: {err.formatted}"
+                )
             content = Path(tmp).read_text()
             return json.loads(content) if content else {}
         finally:
@@ -221,7 +225,11 @@ class SubInterpreterEnv:
                 "    _r = {'status': 'error', 'msg': str(_e)}\n"
                 f"open({repr(output_path)}, 'w').write(_j.dumps(_r))\n"
             )
-            _interpreters.run_string(self.interp_id, probe_code)
+            err = _interpreters.run_string(self.interp_id, probe_code)
+            if err is not None:
+                raise RuntimeError(
+                    f"Sub-interpreter probe failed: {err.formatted}"
+                )
 
             result = json.loads(Path(output_path).read_text())
             status = result.get("status")

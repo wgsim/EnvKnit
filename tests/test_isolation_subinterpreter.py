@@ -46,6 +46,13 @@ def test_eval_json_empty_if_no_result():
     assert data == {}
 
 
+def test_eval_json_propagates_subinterpreter_exception():
+    """sub-interpreter 내부에서 예외 발생 시 RuntimeError로 propagate됨."""
+    with SubInterpreterEnv("test") as interp:
+        with pytest.raises(RuntimeError, match="Sub-interpreter execution failed"):
+            interp.eval_json("raise ValueError('boom')")
+
+
 def test_eval_json_requires_active_context():
     interp = SubInterpreterEnv("test")
     with pytest.raises(RuntimeError):
