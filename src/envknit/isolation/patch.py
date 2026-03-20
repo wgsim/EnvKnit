@@ -82,5 +82,3 @@ def unpatch_thread_context() -> None:
     threading.Thread.start = _original_thread_start
     concurrent.futures.ThreadPoolExecutor.submit = _original_executor_submit  # type: ignore
     _patched = False
-def debug_patch():
-    print(f"Patched: {_patched}")

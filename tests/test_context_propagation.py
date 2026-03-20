@@ -127,7 +127,9 @@ from envknit.isolation.import_hook import ImportHookManager, _active_versions, u
 
 
 def _fresh_manager():
-    """Reset singleton state to get a clean ImportHookManager."""
+    """Reset singleton and patch state to get a clean ImportHookManager."""
+    from envknit.isolation.patch import unpatch_thread_context
+    unpatch_thread_context()
     hook_mod._manager = None
     ImportHookManager._instance = None
     return hook_mod.get_manager()
@@ -175,27 +177,25 @@ def test_context_executor_with_use_block():
 
 def test_plain_thread_loses_context_regression():
     """
-    Plain threading.Thread does NOT inherit context when the import hook
-    (and its thread monkey-patch) is NOT installed — regression guard.
-    This confirms that ContextThread propagation is not a Python default.
+    Plain threading.Thread does NOT inherit context — regression guard.
+    This confirms ContextThread is opt-in, not automatic.
+    Must run with the monkey-patch uninstalled.
     """
-    # Use a fresh manager but do NOT install it (no patch_thread_context call).
-    manager = _fresh_manager()
+    from envknit.isolation import patch as patch_mod
+    assert not patch_mod._patched, "Monkey-patch must not be active for this regression test"
+
     result = {}
 
     def worker():
         result["versions"] = _active_versions.get()
 
-    # Manually set _active_versions without the manager's use() helper so we
-    # can control context isolation without triggering install().
-    token = _active_versions.set({"fake_pkg": "1.0.0"})
+    _active_versions.set({"fake_pkg": "1.0.0"})
     try:
-        assert _active_versions.get().get("fake_pkg") == "1.0.0"
         t = threading.Thread(target=worker)
         t.start()
         t.join()
+        # Without patch or ContextThread, plain Thread does not inherit context
+        assert result["versions"].get("fake_pkg") is None
     finally:
-        _active_versions.reset(token)
-
-    # Without the monkey-patch, plain Thread does NOT inherit context.
-    assert result["versions"].get("fake_pkg") is None
+        # Reset the ContextVar we set directly
+        _active_versions.set({})
