@@ -120,3 +120,82 @@ def test_context_executor_per_submit_snapshot():
 
     assert results["k1"] == "v1"
     assert results["k2"] == "v2"
+
+
+import envknit.isolation.import_hook as hook_mod
+from envknit.isolation.import_hook import ImportHookManager, _active_versions, use
+
+
+def _fresh_manager():
+    """Reset singleton state to get a clean ImportHookManager."""
+    hook_mod._manager = None
+    ImportHookManager._instance = None
+    return hook_mod.get_manager()
+
+
+def test_context_thread_with_use_block():
+    """ContextThread inherits active_versions from use() block."""
+    manager = _fresh_manager()
+    manager.install()
+    result = {}
+
+    def worker():
+        result["versions"] = _active_versions.get()
+
+    try:
+        with use("fake_pkg", "1.0.0"):
+            assert _active_versions.get().get("fake_pkg") == "1.0.0"
+            t = ContextThread(target=worker)
+            t.start()
+            t.join()
+
+        assert result["versions"].get("fake_pkg") == "1.0.0"
+    finally:
+        manager.uninstall()
+
+
+def test_context_executor_with_use_block():
+    """ContextExecutor inherits active_versions from use() block."""
+    manager = _fresh_manager()
+    manager.install()
+
+    def worker():
+        return _active_versions.get()
+
+    try:
+        with use("fake_pkg", "2.0.0"):
+            with ContextExecutor(max_workers=1) as executor:
+                future = executor.submit(worker)
+                versions = future.result()
+
+        assert versions.get("fake_pkg") == "2.0.0"
+    finally:
+        manager.uninstall()
+
+
+def test_plain_thread_loses_context_regression():
+    """
+    Plain threading.Thread does NOT inherit context when the import hook
+    (and its thread monkey-patch) is NOT installed — regression guard.
+    This confirms that ContextThread propagation is not a Python default.
+    """
+    # Use a fresh manager but do NOT install it (no patch_thread_context call).
+    manager = _fresh_manager()
+    result = {}
+
+    def worker():
+        result["versions"] = _active_versions.get()
+
+    # Manually set _active_versions without the manager's use() helper so we
+    # can control context isolation without triggering install().
+    token = _active_versions.set({"fake_pkg": "1.0.0"})
+    try:
+        assert _active_versions.get().get("fake_pkg") == "1.0.0"
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join()
+    finally:
+        _active_versions.reset(token)
+
+    # Without the monkey-patch, plain Thread does NOT inherit context.
+    assert result["versions"].get("fake_pkg") is None
