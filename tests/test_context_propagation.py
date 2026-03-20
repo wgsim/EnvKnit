@@ -130,6 +130,7 @@ def _fresh_manager():
     """Reset singleton and patch state to get a clean ImportHookManager."""
     from envknit.isolation.patch import unpatch_thread_context
     unpatch_thread_context()
+    _active_versions.set({})
     hook_mod._manager = None
     ImportHookManager._instance = None
     return hook_mod.get_manager()
