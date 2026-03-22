@@ -330,19 +330,149 @@ pip install --upgrade envknit
 
 ---
 
-## Choosing Between `use()` and `worker()`
+---
 
-| Criteria | `use()` | `worker()` |
+## `SubInterpreterEnv` — Gen 2 Hard Isolation (Python 3.12+)
+
+`SubInterpreterEnv` spawns a true C-API sub-interpreter (PEP 684) with a completely
+independent `sys.modules`, `sys.path`, and GIL. Host site-packages are never visible
+inside the sub-interpreter.
+
+> **Requires Python 3.12+** with the `_interpreters` internal module. Raises
+> `UnsupportedPlatformError` on older Python versions.
+
+```python
+from envknit.isolation import SubInterpreterEnv
+
+with SubInterpreterEnv("ml") as interp:
+    # Replace sys.path with lockfile paths + stdlib only (host packages blocked)
+    interp.configure_from_lock("envknit.lock.yaml", env_name="ml")
+
+    # Execute code and retrieve a JSON-serialisable result
+    result = interp.eval_json("""
+import some_ml_lib
+result = {"version": some_ml_lib.__version__, "value": 42}
+""")
+
+print(result)  # {"version": "...", "value": 42}
+```
+
+### `configure_from_lock(lock_path, env_name="default")`
+
+Reads the lock file and replaces the sub-interpreter's `sys.path` with:
+- The `install_path` entries for `env_name` from the lock file
+- Standard library paths only (`stdlib`, `platstdlib` via `sysconfig`)
+
+Host `site-packages` are **never** included.
+
+| Parameter | Type | Description |
 |---|---|---|
-| Package type | Pure-Python only | Pure-Python or C extensions |
-| Async-safe | Yes (ContextVar) | Yes (subprocess is isolated) |
-| Performance | Fast (in-process) | Slower (IPC overhead) |
-| Memory | Shared process memory | Separate process memory |
-| Large data transfer | Fast | Serialization overhead |
-| `isinstance()` checks | Work correctly | Fail across subprocess boundary |
-| Global state isolation | Partial (ContextVar only) | Complete (separate process) |
-| C extension support | No (`CExtensionError`) | Yes |
+| `lock_path` | `str` | Path to `envknit.lock.yaml` |
+| `env_name` | `str` | Environment name in the lock file (default: `"default"`) |
+
+Raises `ValueError` if `env_name` is not found.
+
+### `eval_json(code)`
+
+Executes `code` in the sub-interpreter and returns the value assigned to `result`
+as a JSON-deserialised `dict`. Returns `{}` if `result` is not defined.
+Raises `RuntimeError` if the sub-interpreter code raises an exception.
+
+```python
+data = interp.eval_json("""
+import sys
+result = {"python": sys.version, "path_count": len(sys.path)}
+""")
+```
+
+> **Security note**: `eval_json()` executes the `code` string as-is. Never interpolate
+> untrusted input into `code`. For probing untrusted module names, use `try_import()`.
+
+### `try_import(module_name)`
+
+Probes whether a module can be loaded in the sub-interpreter. The module name is passed
+as JSON data — never interpolated into Python code — preventing code injection.
+
+| Return / Raise | Meaning |
+|---|---|
+| `True` | Module loaded successfully |
+| `False` | C-extension with PEP 489 single-phase init — use `worker()` fallback |
+| `ImportError` | Module not found or unrelated import failure |
+
+```python
+with SubInterpreterEnv("ml") as interp:
+    if interp.try_import("numpy"):
+        # numpy supports multi-phase init — safe to use in sub-interpreter
+        result = interp.eval_json("import numpy; result = {'ok': True}")
+    else:
+        # fallback to subprocess worker
+        with envknit.worker("numpy", "1.26.4") as np:
+            result = {"ok": np.zeros(1).tolist()}
+```
+
+### Error Types
+
+| Exception | Raised when |
+|---|---|
+| `UnsupportedPlatformError` | Python < 3.12 or `_interpreters` unavailable |
+| `CExtIncompatibleError` | Defined for callers that prefer exceptions over `False` return |
+| `RuntimeError` | `eval_json()` / `run_string()` — sub-interpreter code raised |
+
+---
+
+## `ContextThread` / `ContextExecutor` / `context_wrap`
+
+By default, `threading.Thread` does **not** inherit `ContextVar` state from the parent
+thread. This means the active version set by `envknit.use()` is silently dropped in
+background threads.
+
+Use these opt-in wrappers to propagate context:
+
+```python
+from envknit.isolation import ContextThread, ContextExecutor, context_wrap
+
+# ContextThread — snapshots context at __init__ time (not start() time)
+with envknit.use("requests", "2.28.2"):
+    t = ContextThread(target=worker_fn)
+
+t.start()   # worker_fn sees "requests" == "2.28.2" even after use() block exits
+t.join()
+
+# ContextExecutor — snapshots context at submit() time
+with envknit.use("requests", "2.28.2"):
+    with ContextExecutor(max_workers=4) as pool:
+        future = pool.submit(worker_fn)   # captures context at this point
+
+# context_wrap — one-shot callable wrapper
+with envknit.use("requests", "2.28.2"):
+    wrapped = context_wrap(worker_fn)
+
+threading.Thread(target=wrapped).start()  # uses captured context
+```
+
+| API | Snapshot time | Based on |
+|---|---|---|
+| `ContextThread` | `__init__()` | `threading.Thread` subclass |
+| `ContextExecutor` | `submit()` | `ThreadPoolExecutor` subclass |
+| `context_wrap(fn)` | call time | Returns a closure |
+
+---
+
+## Choosing the Right API
+
+| Criteria | `use()` | `worker()` | `SubInterpreterEnv` |
+|---|---|---|---|
+| Package type | Pure-Python only | Any (incl. C extensions) | Any (Python 3.12+) |
+| Isolation level | Soft (ContextVar) | Complete (subprocess) | Complete (sub-interpreter) |
+| Async-safe | Yes | Yes | Yes |
+| Performance | Fast (in-process) | Slow (process IPC) | Medium (interpreter IPC) |
+| Memory | Shared | Separate process | Separate interpreter |
+| `isinstance()` checks | Work correctly | Fail across boundary | Fail across boundary |
+| Global state isolation | Partial | Complete | Complete |
+| C extension support | No | Yes | Probe with `try_import()` |
+| Python version required | 3.10+ | 3.10+ | 3.12+ |
 
 **Rule of thumb**:
-- Use `use()` for HTTP clients, serialization libraries, utility packages.
-- Use `worker()` for numpy, pandas, scipy, or any package that registers C-level global state.
+- `use()` — HTTP clients, serialization libs, pure-Python utilities.
+- `worker()` — numpy, pandas, scipy, any C-level global state package.
+- `SubInterpreterEnv` — when you need hard `sys.modules` isolation in-process (e.g., conflicting logging config, global registries) and are on Python 3.12+.

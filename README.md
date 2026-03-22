@@ -68,17 +68,56 @@ envknit run --env ml -- python train.py
 
 > **EXPERIMENTAL:** EnvKnit intentionally bypasses Python's "one module per process" singleton rule. While powerful for API migrations, it breaks traditional type checking (`isinstance`) across versions. **Use with caution.**
 
-Beyond standard environment management, EnvKnit provides a Python library for edge-case dependency conflicts. You can use `ContextVars` to dynamically route imports, allowing you to run multiple versions of the same pure-Python package concurrently in a single script.
+Beyond standard environment management, EnvKnit provides three strategies for in-process isolation:
+
+### Gen 1 — Soft Isolation (`use()`)
+
+Dynamically routes imports via `ContextVars`. Fast, but shares global interpreter state.
 
 ```python
 import envknit
 
-# Route imports to a specific version for this block only
 with envknit.use("requests", "2.28.2"):
     import requests
-    print(requests.__version__)
+    print(requests.__version__)  # 2.28.2
 ```
-*(For C-extension packages like `numpy`, EnvKnit provides the `envknit.worker()` API to isolate them in subprocesses).*
+
+*(For C-extension packages like `numpy`, use `envknit.worker()` to isolate them in subprocesses.)*
+
+### Gen 2 — Hard Isolation (`SubInterpreterEnv`, Python 3.12+)
+
+Spawns a true C-API sub-interpreter (PEP 684) with its own independent `sys.modules`, `sys.path`, and GIL. Host site-packages are never visible inside the sub-interpreter.
+
+```python
+from envknit.isolation import SubInterpreterEnv
+
+with SubInterpreterEnv("ml") as interp:
+    interp.configure_from_lock("envknit.lock.yaml", env_name="ml")
+    result = interp.eval_json("""
+import some_ml_lib
+result = {"version": some_ml_lib.__version__, "status": "ok"}
+""")
+print(result)  # {"version": "...", "status": "ok"}
+```
+
+See the [Gen 2 Hard Isolation Guide](docs/guide/gen2-isolation.md) for full details on DTO patterns, C-extension fallback, and serialization constraints.
+
+### Thread Context Propagation (`ContextThread`, `ContextExecutor`)
+
+By default, `threading.Thread` does not inherit `ContextVar` state. Use opt-in wrappers to propagate the active version context to background threads:
+
+```python
+from envknit.isolation import ContextThread, ContextExecutor
+
+with envknit.use("requests", "2.28.2"):
+    # ContextThread snapshots context at __init__ time
+    t = ContextThread(target=worker_fn)
+    t.start()
+
+    # ContextExecutor snapshots context at submit() time
+    with ContextExecutor(max_workers=4) as pool:
+        future = pool.submit(worker_fn)
+```
 
 ---
 
