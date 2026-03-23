@@ -45,16 +45,12 @@ pub fn uv_version() -> String {
 pub fn parse_uv_output(output: &str) -> Vec<LockedPackage> {
     let mut pkgs = Vec::new();
     for line in output.lines() {
+        // --no-annotate is passed to uv, so inline comments won't appear in normal output;
+        // just trim whitespace and skip comment/blank lines.
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        // Strip inline comment
-        let line = if let Some(pos) = line.find(" #") {
-            line[..pos].trim()
-        } else {
-            line
-        };
         // Parse name==version
         if let Some((name, version)) = line.split_once("==") {
             pkgs.push(LockedPackage {
@@ -71,7 +67,7 @@ pub fn parse_uv_output(output: &str) -> Vec<LockedPackage> {
     pkgs
 }
 
-fn resolve_set(specs: &[String], python_version: Option<&str>) -> Result<Vec<LockedPackage>> {
+fn resolve_set(specs: &[String], python_version: Option<&str>, context: &str) -> Result<Vec<LockedPackage>> {
     let mut cmd = Command::new("uv");
     cmd.args(["pip", "compile", "--no-annotate", "--quiet", "-"]);
     if let Some(py) = python_version {
@@ -89,7 +85,7 @@ fn resolve_set(specs: &[String], python_version: Option<&str>) -> Result<Vec<Loc
     let output = child.wait_with_output()?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("uv pip compile failed: {}", stderr);
+        bail!("uv pip compile failed ({}): {}", context, stderr);
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     Ok(parse_uv_output(&stdout))
@@ -100,7 +96,7 @@ pub fn resolve(
     dev_specs: &[String],
     python_version: Option<&str>,
 ) -> Result<(Vec<LockedPackage>, Vec<LockedPackage>)> {
-    let prod = resolve_set(specs, python_version)?;
+    let prod = resolve_set(specs, python_version, "prod")?;
     if dev_specs.is_empty() {
         return Ok((prod, Vec::new()));
     }
@@ -109,9 +105,13 @@ pub fn resolve(
 
     let mut combined = specs.to_vec();
     combined.extend_from_slice(dev_specs);
-    let all = resolve_set(&combined, python_version)?;
 
-    let mut dev_only: Vec<LockedPackage> = all
+    // Note: two separate uv invocations may select slightly different versions for shared
+    // packages when dev deps introduce additional constraints. In that case prod_packages
+    // takes precedence; dev-only packages are the remainder not present in prod by name.
+    let all = resolve_set(&combined, python_version, "prod+dev")?;
+
+    let dev_only: Vec<LockedPackage> = all
         .into_iter()
         .filter(|p| !prod_names.contains(&p.name.to_lowercase()))
         .map(|mut p| {
@@ -126,6 +126,10 @@ pub fn resolve(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Serialises PATH mutations across all tests in this module.
+    // Callers must also pass `-- --test-threads=1` to prevent races with tests in other modules.
+    static PATH_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn parse_uv_output_basic() {
@@ -148,17 +152,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_uv_output_strips_inline_comment() {
-        let output = "requests==2.31.0    # via something\nurllib3==2.0.7 # via requests\n";
-        let pkgs = parse_uv_output(output);
-        assert_eq!(pkgs.len(), 2);
-        assert_eq!(pkgs[0].name, "requests");
-        assert_eq!(pkgs[0].version, "2.31.0");
-        assert_eq!(pkgs[1].name, "urllib3");
-        assert_eq!(pkgs[1].version, "2.0.7");
-    }
-
-    #[test]
     fn parse_uv_output_empty() {
         let pkgs = parse_uv_output("");
         assert!(pkgs.is_empty());
@@ -166,7 +159,6 @@ mod tests {
 
     #[test]
     fn find_uv_returns_none_with_empty_path() {
-        static PATH_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let _guard = PATH_MUTEX.lock().unwrap();
         let orig = std::env::var("PATH").unwrap_or_default();
         std::env::set_var("PATH", "");
