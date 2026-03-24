@@ -8,6 +8,7 @@ pub mod lockfile;
 pub mod node_resolver;
 pub mod python_resolver;
 pub mod resolver;
+pub mod uv_resolver;
 
 /// Shared mutex for tests that mutate the process working directory.
 /// All CWD-sensitive tests must hold this lock to avoid parallel interference.

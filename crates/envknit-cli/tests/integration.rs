@@ -362,3 +362,54 @@ fn config_with_node_version_parses_correctly() {
         Some("20.11")
     );
 }
+
+// ── lock ──────────────────────────────────────────────────────────────────────
+
+#[test]
+fn lock_dry_run_does_not_write_lockfile() {
+    let _guard = CWD_LOCK.lock().unwrap();
+    let dir = tmpdir("lock_dry_run");
+    write(&dir, "envknit.yaml", SIMPLE_CONFIG);
+    let prev = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&dir).unwrap();
+
+    let result = envknit_cli::commands::lock::run(None, true, None);  // dry_run=true
+
+    std::env::set_current_dir(&prev).unwrap();
+    assert!(result.is_ok(), "dry run failed: {:?}", result);
+    assert!(
+        !dir.join("envknit.lock.yaml").exists(),
+        "dry run must not write lock file"
+    );
+}
+
+#[test]
+fn lock_command_with_uv_produces_valid_lockfile() {
+    // Only run if uv is available
+    if envknit_cli::uv_resolver::find_uv().is_none() {
+        eprintln!("uv not found — skipping uv lock test");
+        return;
+    }
+
+    let _guard = CWD_LOCK.lock().unwrap();
+    let dir = tmpdir("lock_uv");
+    write(&dir, "envknit.yaml", r#"
+environments:
+  default:
+    packages:
+      - requests>=2.28
+"#);
+    let prev = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&dir).unwrap();
+
+    let result = envknit_cli::commands::lock::run(None, false, None);
+
+    std::env::set_current_dir(&prev).unwrap();
+    assert!(result.is_ok(), "lock failed: {:?}", result);
+
+    let lock_content = std::fs::read_to_string(dir.join("envknit.lock.yaml")).unwrap();
+    assert!(lock_content.contains("requests"), "lock missing requests");
+    assert!(lock_content.contains("version:"), "lock missing pinned version field");
+    // resolver_version should indicate uv was used
+    assert!(lock_content.contains("uv/"), "lock should record uv as resolver");
+}
