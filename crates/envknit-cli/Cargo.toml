@@ -1,6 +1,6 @@
 [package]
 name = "envknit-cli"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2021"
 description = "EnvKnit CLI — standalone binary for multi-version Python package management"
 license = "MIT"

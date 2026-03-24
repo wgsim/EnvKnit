@@ -65,6 +65,22 @@ All notable changes to EnvKnit are documented here.
 
 ---
 
+## [0.1.2] — 2026-03-24
+
+### Added
+- **uv resolver delegation** (`uv_resolver.rs`): `envknit lock` now delegates to `uv pip compile` when `uv` is on PATH, falling back to the built-in resolver otherwise. Resolver used is recorded in `lock.resolver_version` (e.g. `uv/0.10.7`).
+- **Extras support in lock specs**: `name[extra]>=version` (PEP 508) correctly passed to uv resolver.
+- **Security: newline injection guard**: package spec strings are rejected if they contain `\n` or `\r` characters to prevent uv flag injection via crafted package names.
+- **`lock_generated_at` timestamp** in lock file for audit trails.
+- **Dependency isolation guide** (`docs/guide/dependency-isolation.md`): 9-section document covering version constraints vs installed versions, runtime activation patterns, `sys.modules` conflicts, worker subprocess isolation, and nested dependency conflict resolution strategies.
+
+### Fixed
+- `use_uv` flag no longer suppressed during `--dry-run`; dry-run now shows uv-resolved versions (same as real lock).
+- `resolver_version` in lock file now correctly reflects `uv/<version>` vs `envknit-builtin/<version>`.
+
+### Changed
+- `envknit lock` resolver detection runs once before the environment loop (not per-environment).
+
 ## [Unreleased]
 
 ### Known limitations
