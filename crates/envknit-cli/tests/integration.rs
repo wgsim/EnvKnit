@@ -32,6 +32,32 @@ fn write(dir: &Path, name: &str, content: &str) -> PathBuf {
     p
 }
 
+/// Config with prod + dev packages to exercise dev_packages handling.
+const DEV_CONFIG: &str = r#"
+environments:
+  default:
+    packages:
+      - requests>=2.28
+    dev_packages:
+      - pytest>=7.0
+"#;
+
+const DEV_LOCK: &str = r#"
+schema_version: "1.0"
+lock_generated_at: "2026-01-01T00:00:00+00:00"
+resolver_version: "0.1.0"
+environments:
+  default:
+    - name: requests
+      version: "2.31.0"
+      dev: false
+      sha256: ~
+    - name: pytest
+      version: "7.4.4"
+      dev: true
+      sha256: ~
+"#;
+
 /// Config with only production packages (no dev) to avoid lock-drift in `check` tests.
 const SIMPLE_CONFIG: &str = r#"
 environments:
@@ -360,6 +386,83 @@ fn config_with_node_version_parses_correctly() {
     assert_eq!(
         cfg.environments["frontend"].node_version.as_deref(),
         Some("20.11")
+    );
+}
+
+// ── dev_packages ─────────────────────────────────────────────────────────────
+
+#[test]
+fn dev_packages_parsed_from_config() {
+    let dir = tmpdir("dev_parse");
+    write(&dir, "envknit.yaml", DEV_CONFIG);
+    let cfg = envknit_cli::config::Config::load(&dir.join("envknit.yaml")).unwrap();
+    let env = &cfg.environments["default"];
+    assert_eq!(env.packages.len(), 1);
+    assert_eq!(env.packages[0].name, "requests");
+    assert_eq!(env.dev_packages.len(), 1);
+    assert_eq!(env.dev_packages[0].name, "pytest");
+}
+
+#[test]
+fn check_passes_with_dev_packages_in_lock() {
+    let _lock = CWD_LOCK.lock().unwrap();
+    let dir = tmpdir("check_dev");
+    write(&dir, "envknit.yaml", DEV_CONFIG);
+    write(&dir, "envknit.lock.yaml", DEV_LOCK);
+    let prev = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&dir).unwrap();
+
+    let result = envknit_cli::commands::check::run();
+    std::env::set_current_dir(prev).unwrap();
+    assert!(result.is_ok(), "check should pass when dev packages are present in lock");
+}
+
+#[test]
+fn export_no_dev_excludes_dev_packages() {
+    let _lock = CWD_LOCK.lock().unwrap();
+    let dir = tmpdir("export_no_dev");
+    let out = dir.join("requirements.txt");
+    write(&dir, "envknit.lock.yaml", DEV_LOCK);
+    let prev = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&dir).unwrap();
+
+    envknit_cli::commands::export::run(
+        "requirements".to_string(),
+        Some(out.to_string_lossy().into_owned()),
+        true, // no_dev=true
+    )
+    .unwrap();
+
+    let content = fs::read_to_string(&out).unwrap();
+    std::env::set_current_dir(prev).unwrap();
+    assert!(content.contains("requests"), "prod package should be exported");
+    assert!(!content.contains("pytest"), "dev package must be excluded when no_dev=true");
+}
+
+#[test]
+fn lock_uv_with_dev_packages_marks_dev_flag() {
+    if envknit_cli::uv_resolver::find_uv().is_none() {
+        eprintln!("uv not found — skipping dev_packages uv test");
+        return;
+    }
+
+    let _guard = CWD_LOCK.lock().unwrap();
+    let dir = tmpdir("lock_uv_dev");
+    write(&dir, "envknit.yaml", DEV_CONFIG);
+    let prev = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&dir).unwrap();
+
+    let result = envknit_cli::commands::lock::run(None, false, None);
+    std::env::set_current_dir(&prev).unwrap();
+    assert!(result.is_ok(), "lock with dev_packages failed: {:?}", result);
+
+    let lock_content = std::fs::read_to_string(dir.join("envknit.lock.yaml")).unwrap();
+    assert!(lock_content.contains("requests"), "lock should contain prod package");
+    assert!(lock_content.contains("pytest"), "lock should contain dev package");
+    // pytest entry must be marked dev: true
+    assert!(
+        lock_content.contains("dev: true"),
+        "dev package should be marked dev: true in lock"
     );
 }
 
