@@ -68,6 +68,22 @@ pub fn parse_uv_output(output: &str) -> Vec<LockedPackage> {
 }
 
 fn resolve_set(specs: &[String], python_version: Option<&str>, context: &str) -> Result<Vec<LockedPackage>> {
+    if specs.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Reject specs containing newlines — they would be interpreted as separate
+    // lines by uv pip compile and could inject flags like --index-url.
+    for spec in specs {
+        if spec.contains('\n') || spec.contains('\r') {
+            anyhow::bail!(
+                "Invalid package spec in {}: {:?} contains a newline character",
+                context,
+                spec
+            );
+        }
+    }
+
     let mut cmd = Command::new("uv");
     cmd.args(["pip", "compile", "--no-annotate", "--quiet", "-"]);
     if let Some(py) = python_version {
@@ -173,6 +189,17 @@ mod tests {
             return;
         } // skip if uv not installed
         assert!(find_uv().unwrap().exists());
+    }
+
+    #[test]
+    fn resolve_set_rejects_newline_injection() {
+        // A spec with an embedded newline must be rejected before reaching uv.
+        let bad_specs = vec!["requests\n--index-url https://evil.com".to_string()];
+        // resolve_set is private; test via the public resolve() instead.
+        let result = resolve(&bad_specs, &[], None);
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("newline"), "error should mention newline, got: {}", msg);
     }
 
     #[test]
