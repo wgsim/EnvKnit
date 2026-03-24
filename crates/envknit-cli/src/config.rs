@@ -159,6 +159,16 @@ mod tests {
     }
 
     #[test]
+    fn test_to_uv_spec_extras_no_version() {
+        let s = PackageSpec {
+            name: "requests".to_string(),
+            version: None,
+            extras: vec!["security".to_string()],
+        };
+        assert_eq!(s.to_uv_spec(), "requests[security]");
+    }
+
+    #[test]
     fn test_parse_name_only() {
         let s = PackageSpec::parse("numpy");
         assert_eq!(s.name, "numpy");

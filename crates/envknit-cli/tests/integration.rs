@@ -433,10 +433,57 @@ fn export_no_dev_excludes_dev_packages() {
     )
     .unwrap();
 
-    let content = fs::read_to_string(&out).unwrap();
     std::env::set_current_dir(prev).unwrap();
+    let content = fs::read_to_string(&out).unwrap();
     assert!(content.contains("requests"), "prod package should be exported");
     assert!(!content.contains("pytest"), "dev package must be excluded when no_dev=true");
+}
+
+#[test]
+fn export_with_dev_includes_dev_packages() {
+    let _lock = CWD_LOCK.lock().unwrap();
+    let dir = tmpdir("export_with_dev");
+    let out = dir.join("requirements.txt");
+    write(&dir, "envknit.lock.yaml", DEV_LOCK);
+    let prev = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&dir).unwrap();
+
+    envknit_cli::commands::export::run(
+        "requirements".to_string(),
+        Some(out.to_string_lossy().into_owned()),
+        false, // no_dev=false — include dev packages
+    )
+    .unwrap();
+
+    std::env::set_current_dir(prev).unwrap();
+    let content = fs::read_to_string(&out).unwrap();
+    assert!(content.contains("requests"), "prod package should be exported");
+    assert!(content.contains("pytest"), "dev package should be included when no_dev=false");
+}
+
+#[test]
+fn check_fails_when_dev_package_missing_from_lock() {
+    let _lock = CWD_LOCK.lock().unwrap();
+    let dir = tmpdir("check_dev_drift");
+    // Lock only has the prod package; config expects pytest as dev dep too
+    let partial_lock = r#"
+schema_version: "1.0"
+lock_generated_at: "2026-01-01T00:00:00+00:00"
+resolver_version: "0.1.0"
+environments:
+  default:
+    - name: requests
+      version: "2.31.0"
+      dev: false
+"#;
+    write(&dir, "envknit.yaml", DEV_CONFIG);
+    write(&dir, "envknit.lock.yaml", partial_lock);
+    let prev = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&dir).unwrap();
+
+    let result = envknit_cli::commands::check::run();
+    std::env::set_current_dir(prev).unwrap();
+    assert!(result.is_err(), "check should fail when dev package is absent from lock");
 }
 
 #[test]

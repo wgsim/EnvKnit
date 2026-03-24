@@ -120,9 +120,11 @@ fn resolve_set(specs: &[String], python_version: Option<&str>, context: &str) ->
 ///    against the same prod versions (no silent downgrades), while still allowing the
 ///    caller to strip dev packages from production installs.
 ///
-/// The two invocations may select different versions for packages that appear in both
-/// sets if dev deps introduce additional constraints. In that case prod always wins —
-/// dev-only packages are those absent from the prod result by name.
+/// The two invocations may select different versions for a package that appears in both
+/// closures when dev deps introduce additional constraints. The prod-set versions are
+/// canonical: any package present in both the prod and combined closures uses the version
+/// from the prod invocation. Dev-only packages are identified by set-subtraction on prod
+/// package names — anything in the combined closure that is not in prod by name.
 pub fn resolve(
     specs: &[String],
     dev_specs: &[String],

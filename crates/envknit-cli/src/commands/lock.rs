@@ -77,10 +77,7 @@ pub fn run(update: Option<String>, dry_run: bool, env: Option<String>) -> Result
             let prod_strings: Vec<String> = specs.iter().map(|s| s.to_uv_spec()).collect();
             let dev_strings: Vec<String> = dev_specs.iter().map(|s| s.to_uv_spec()).collect();
             let python_version = env_config.python_version.as_deref();
-            let (prod, mut dev) = uv_resolver::resolve(&prod_strings, &dev_strings, python_version)?;
-            for pkg in &mut dev {
-                pkg.dev = true;
-            }
+            let (prod, dev) = uv_resolver::resolve(&prod_strings, &dev_strings, python_version)?;
             (prod, dev)
         } else {
             let resolver = Resolver::new(dry_run);
