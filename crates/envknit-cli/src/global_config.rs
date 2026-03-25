@@ -31,6 +31,11 @@ pub struct GlobalConfig {
     /// Number of parallel pip workers during `install` (default: 4).
     #[serde(default = "default_parallel_jobs")]
     pub parallel_jobs: usize,
+
+    /// Timeout in seconds for individual subprocess calls (uv pip compile, pip install).
+    /// Set to 0 to disable the timeout. Default: 300.
+    #[serde(default = "default_subprocess_timeout")]
+    pub subprocess_timeout_secs: u64,
 }
 
 fn default_cache_ttl() -> u64 {
@@ -39,6 +44,10 @@ fn default_cache_ttl() -> u64 {
 
 fn default_parallel_jobs() -> usize {
     4
+}
+
+fn default_subprocess_timeout() -> u64 {
+    300
 }
 
 impl Default for GlobalConfig {
@@ -50,6 +59,7 @@ impl Default for GlobalConfig {
             node_version_manager: None,
             cache_ttl_secs: default_cache_ttl(),
             parallel_jobs: default_parallel_jobs(),
+            subprocess_timeout_secs: default_subprocess_timeout(),
         }
     }
 }
@@ -139,6 +149,7 @@ mod tests {
             node_version_manager: None,
             cache_ttl_secs: 600,
             parallel_jobs: 8,
+            subprocess_timeout_secs: 120,
         };
         let yaml = serde_yaml::to_string(&cfg).unwrap();
         let loaded: GlobalConfig = serde_yaml::from_str(&yaml).unwrap();

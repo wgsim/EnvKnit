@@ -7,6 +7,7 @@ pub mod global_config;
 pub mod lockfile;
 pub mod node_resolver;
 pub mod python_resolver;
+pub mod process_util;
 pub mod resolver;
 pub mod uv_resolver;
 

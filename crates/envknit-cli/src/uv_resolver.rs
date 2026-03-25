@@ -1,9 +1,11 @@
 use crate::lockfile::LockedPackage;
+use crate::process_util::wait_output_timeout;
 use anyhow::{bail, Result};
 use std::collections::HashSet;
 use std::io::Write as IoWrite;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 pub fn find_uv() -> Option<PathBuf> {
     // Check uv is runnable
@@ -67,7 +69,7 @@ pub fn parse_uv_output(output: &str) -> Vec<LockedPackage> {
     pkgs
 }
 
-fn resolve_set(specs: &[String], python_version: Option<&str>, context: &str) -> Result<Vec<LockedPackage>> {
+fn resolve_set(specs: &[String], python_version: Option<&str>, context: &str, timeout: Duration) -> Result<Vec<LockedPackage>> {
     if specs.is_empty() {
         return Ok(vec![]);
     }
@@ -98,7 +100,7 @@ fn resolve_set(specs: &[String], python_version: Option<&str>, context: &str) ->
         let mut stdin = stdin;
         stdin.write_all(specs.join("\n").as_bytes())?;
     }
-    let output = child.wait_with_output()?;
+    let output = wait_output_timeout(child, timeout)?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         bail!("uv pip compile failed ({}): {}", context, stderr);
@@ -129,17 +131,38 @@ pub fn resolve(
     specs: &[String],
     dev_specs: &[String],
     python_version: Option<&str>,
+    timeout: Duration,
 ) -> Result<(Vec<LockedPackage>, Vec<LockedPackage>)> {
-    let prod = resolve_set(specs, python_version, "prod")?;
+    let prod = resolve_set(specs, python_version, "prod", timeout)?;
     if dev_specs.is_empty() {
         return Ok((prod, Vec::new()));
     }
 
-    let prod_names: HashSet<String> = prod.iter().map(|p| p.name.to_lowercase()).collect();
+    // Build a name→version map from the prod closure for divergence detection.
+    let prod_versions: std::collections::HashMap<String, &str> = prod
+        .iter()
+        .map(|p| (p.name.to_lowercase(), p.version.as_str()))
+        .collect();
+    let prod_names: HashSet<String> = prod_versions.keys().cloned().collect();
 
     let mut combined = specs.to_vec();
     combined.extend_from_slice(dev_specs);
-    let all = resolve_set(&combined, python_version, "prod+dev")?;
+    let all = resolve_set(&combined, python_version, "prod+dev", timeout)?;
+
+    // Warn when a shared package resolves to a different version in the combined
+    // closure.  The prod version always takes precedence in the lock file, so this
+    // is informational only — but it signals a potential constraint conflict.
+    for pkg in &all {
+        let key = pkg.name.to_lowercase();
+        if let Some(&prod_ver) = prod_versions.get(&key) {
+            if pkg.version != prod_ver {
+                eprintln!(
+                    "⚠ version divergence for '{}': prod={}, prod+dev={} — prod version used",
+                    pkg.name, prod_ver, pkg.version
+                );
+            }
+        }
+    }
 
     let dev_only: Vec<LockedPackage> = all
         .into_iter()
@@ -210,7 +233,7 @@ mod tests {
         // A spec with an embedded newline must be rejected before reaching uv.
         let bad_specs = vec!["requests\n--index-url https://evil.com".to_string()];
         // resolve_set is private; test via the public resolve() instead.
-        let result = resolve(&bad_specs, &[], None);
+        let result = resolve(&bad_specs, &[], None, Duration::ZERO);
         assert!(result.is_err());
         let msg = format!("{}", result.unwrap_err());
         assert!(msg.contains("newline"), "error should mention newline, got: {}", msg);
