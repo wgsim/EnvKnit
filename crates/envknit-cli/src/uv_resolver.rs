@@ -1,6 +1,7 @@
 use crate::lockfile::LockedPackage;
 use crate::process_util::wait_output_timeout;
 use anyhow::{bail, Result};
+use colored::Colorize;
 use std::collections::HashSet;
 use std::io::Write as IoWrite;
 use std::path::PathBuf;
@@ -41,6 +42,49 @@ pub fn uv_version() -> String {
             s.strip_prefix("uv ").unwrap_or(s).to_string()
         }
         _ => "unknown".to_string(),
+    }
+}
+
+pub const MIN_UV_VERSION: &str = "0.10.7";
+
+/// Returns true if semver string `a` is strictly less than `b`.
+/// Uses the `semver` crate for correct comparison. Returns false if either
+/// string is unparseable (so we don't warn on unusual version formats).
+pub fn version_lt(a: &str, b: &str) -> bool {
+    use semver::Version;
+    match (Version::parse(a), Version::parse(b)) {
+        (Ok(va), Ok(vb)) => va < vb,
+        _ => false,
+    }
+}
+
+/// Checks that uv is present and meets the minimum tested version.
+///
+/// - uv absent         → bail! (hard error, exits non-zero)
+/// - uv < MIN_UV_VERSION → print ⚠ warning, return Ok(()) (continues)
+/// - uv ≥ MIN_UV_VERSION → return Ok(()) silently
+pub fn require_uv() -> Result<()> {
+    match find_uv() {
+        None => {
+            bail!(
+                "uv is required but not found on PATH.\n\
+                 Install: https://astral.sh/uv\n\
+                 Run `envknit doctor` for system diagnostics."
+            );
+        }
+        Some(_) => {
+            let ver = uv_version();
+            if version_lt(&ver, MIN_UV_VERSION) {
+                eprintln!(
+                    "{} uv {} detected (envknit tested with {}+). \
+                     Consider upgrading: https://astral.sh/uv",
+                    "⚠".yellow(),
+                    ver,
+                    MIN_UV_VERSION
+                );
+            }
+            Ok(())
+        }
     }
 }
 
@@ -246,5 +290,29 @@ mod tests {
         if v != "unknown" {
             assert!(!v.starts_with("uv "), "got: {}", v);
         }
+    }
+
+    #[test]
+    fn version_lt_basic_comparison() {
+        assert!(version_lt("0.4.0", "0.10.7"));
+        assert!(version_lt("0.10.6", "0.10.7"));
+        assert!(!version_lt("0.10.7", "0.10.7"));
+        assert!(!version_lt("0.11.0", "0.10.7"));
+        assert!(!version_lt("1.0.0", "0.10.7"));
+    }
+
+    #[test]
+    fn version_lt_unparseable_returns_false() {
+        assert!(!version_lt("unknown", "0.10.7"));
+        assert!(!version_lt("0.10.7", "unknown"));
+    }
+
+    #[test]
+    fn require_uv_succeeds_when_uv_present() {
+        // This test requires uv to be on PATH. If uv is missing, skip.
+        if find_uv().is_none() {
+            return;
+        }
+        assert!(require_uv().is_ok());
     }
 }
