@@ -159,44 +159,20 @@ pip install envknit
 
 ## 권장 방향
 
-### 단기 (v0.1.0)
-- **pipx 설치 권장** + 문서화
-- Shell 함수로 activate/deactivate 간소화
+### v0.1.x (현재 — Rust CLI)
+- 독립 바이너리 배포 완료 (PyInstaller, GitHub Releases)
+- `envknit run` 기반 런타임 격리 제공
 
-### 중기 (v0.2.0)
-- **Homebrew formula** 작성
-- Shell 설치 스크립트 제공
-
-### 장기 (v1.0.0)
-- 독립 바이너리 배포 검토
-- 플랫폼별 빌드 파이프라인
+### 미래
+- Homebrew formula 검토
+- Shell 설치 스크립트 (`curl | sh`) 제공
 
 ---
 
-## activate/deactivate 구현
+## 참고: activate/deactivate 대체
 
-사용자 요구사항:
-- conda activate처럼 명시적 활성화만 작동
-- 자동으로 PATH 변경하지 않음
-- 프롬프트에 (envknit) 표시
-
-**사용법:**
-```bash
-# ~/.zshrc에 추가 권장
-envknit-activate() {
-    eval "$(envknit activate)"
-}
-
-envknit-deactivate() {
-    eval "$(envknit deactivate)"
-}
-```
-
-**동작:**
-```
-(envknit) user@mac:~$     # 활성화 후
-user@mac:~$               # 비활성화 후
-```
+`activate`/`deactivate` 명령은 제거되었습니다. 런타임 격리는 `envknit run` 또는
+Python 라이브러리의 `envknit.use()` / `envknit.enable()` 으로 대체됩니다.
 
 ---
 
@@ -213,6 +189,6 @@ user@mac:~$               # 비활성화 후
 ## 결론
 
 1. **EnvKnit는 순환 구조를 가짐** - Python으로 작성된 패키지 관리자
-2. **pipx/전용환경 설치 권장** - 시스템 영향 최소화
-3. **activate/deactivate로 명시적 활성화** - 자동 변경 방지
-4. **장기적으로 바이너리 배포 검토** - 근본적 해결
+2. **바이너리 배포로 독립성 확보** - 시스템 Python 영향 최소화
+3. **`envknit run`으로 런타임 격리** - 명시적 활성화 제공
+4. **다중 백엔드 지원** - conda, pip, poetry
