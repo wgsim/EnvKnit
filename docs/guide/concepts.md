@@ -23,11 +23,11 @@ graph TD
         S3[pytest/7.4.3/]
     end
     
-    P1(Project A) -. envknit.lock.yaml .-> S1
-    P1(Project A) -. envknit.lock.yaml .-> S3
-    
-    P2(Project B) -. envknit.lock.yaml .-> S2
-    P2(Project B) -. envknit.lock.yaml .-> S3
+    P1(Project A) -.->|envknit.lock.yaml| S1
+    P1(Project A) -.->|envknit.lock.yaml| S3
+
+    P2(Project B) -.->|envknit.lock.yaml| S2
+    P2(Project B) -.->|envknit.lock.yaml| S3
 ```
 
 ## Two Components, One Lock File
