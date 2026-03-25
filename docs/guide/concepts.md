@@ -6,7 +6,7 @@ Unlike traditional virtual environments (`venv`) that copy/install packages redu
 
 ```mermaid
 graph TD
-    subaxis1(Traditional Virtual Environments)
+    label1(Traditional Virtual Environments)
     subgraph "Project A (.venv/)"
         A1[requests 2.28]
         A2[pytest 7.4]
@@ -16,7 +16,7 @@ graph TD
         B2[pytest 7.4]
     end
     
-    subaxis2(EnvKnit Architecture)
+    label2(EnvKnit Architecture)
     subgraph "Global Package Store (~/.envknit/packages/)"
         S1[requests/2.28.2/]
         S2[requests/2.31.0/]
