@@ -8,7 +8,7 @@
 
 > **Multi-environment package manager for Python and Node.js.**
 
-EnvKnit provides a modern alternative to traditional virtual environments (`venv`). Instead of creating redundant environment folders for every project, EnvKnit uses a **blazing-fast Rust CLI** to resolve dependencies and stores all packages in a **single global store**.
+EnvKnit provides a modern alternative to traditional virtual environments (`venv`). Instead of creating redundant environment folders for every project, EnvKnit uses a **Rust CLI** backed by **[uv](https://docs.astral.sh/uv/)** to resolve dependencies and stores all packages in a **single global store**.
 
 With one `envknit.yaml`, you can cleanly define and switch between multiple, isolated environments (e.g., `default`, `ml`, `frontend`) without the overhead of heavy virtual environments.
 
@@ -19,7 +19,8 @@ With one `envknit.yaml`, you can cleanly define and switch between multiple, iso
 - **Multi-Environment Management**: Define multiple environments in a single project. Switch seamlessly between a `default` backend env and an `ml` env with different dependencies.
 - **Global Package Store**: Packages are installed exactly once in `~/.envknit/packages/` and shared across all projects. Say goodbye to gigabytes of duplicated `.venv` folders.
 - **Unified Toolchain**: Natively respects `python_version` and `node_version` configurations via integrations with tools like `mise`, `fnm`, and `pyenv`.
-- **Rust-Powered CLI**: Ultra-fast dependency resolution and deterministic `envknit.lock.yaml` generation.
+- **uv-Accelerated Resolution**: `envknit lock` delegates to [`uv pip compile`](https://docs.astral.sh/uv/) when uv is on PATH, with automatic fallback to the built-in resolver. The resolver used is recorded in `envknit.lock.yaml`.
+- **Rust-Powered CLI**: Fast, deterministic lock file generation distributed as a single self-contained binary via GitHub Releases.
 - **Transparent Execution**: Run tools with `envknit run -- <command>` to automatically inject the correct environment paths into `PYTHONPATH` or `PATH`.
 
 ---
@@ -41,7 +42,7 @@ envknit add "numpy>=1.24,<2.0" --env ml
 ```
 
 ### 2. Lock and Install
-Resolve dependencies and install them to the global store.
+Resolve dependencies (via uv when available) and install them to the global store.
 
 ```bash
 envknit lock
@@ -68,7 +69,7 @@ envknit run --env ml -- python train.py
 
 > **EXPERIMENTAL:** EnvKnit intentionally bypasses Python's "one module per process" singleton rule. While powerful for API migrations, it breaks traditional type checking (`isinstance`) across versions. **Use with caution.**
 
-Beyond standard environment management, EnvKnit provides three strategies for in-process isolation:
+Beyond standard environment management, EnvKnit provides three strategies for in-process isolation. **Most users need only `envknit run`** (no Python API required). The strategies below are for cases where subprocess-per-environment is insufficient:
 
 ### Gen 1 — Soft Isolation (`use()`)
 
