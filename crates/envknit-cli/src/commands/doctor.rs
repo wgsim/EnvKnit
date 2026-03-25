@@ -3,6 +3,7 @@ use crate::global_config::GlobalConfig;
 use crate::lockfile::LockFile;
 use crate::node_resolver;
 use crate::python_resolver;
+use crate::uv_resolver;
 use anyhow::Result;
 use colored::Colorize;
 use std::path::Path;
@@ -77,6 +78,31 @@ pub fn run() -> Result<()> {
                 checks.push(Check::fail("pip", "pip not found — install pip to use `envknit install`"));
             }
         },
+    }
+
+    // --- uv (required) ---
+    match uv_resolver::find_uv() {
+        None => {
+            checks.push(Check::fail(
+                "uv",
+                "not found — required for `envknit lock`. Install: https://astral.sh/uv",
+            ));
+        }
+        Some(_) => {
+            let ver = uv_resolver::uv_version();
+            if uv_resolver::version_lt(&ver, uv_resolver::MIN_UV_VERSION) {
+                checks.push(Check::warn(
+                    "uv",
+                    format!(
+                        "{} — below minimum tested version {}. Upgrade: https://astral.sh/uv",
+                        ver,
+                        uv_resolver::MIN_UV_VERSION
+                    ),
+                ));
+            } else {
+                checks.push(Check::ok("uv", ver));
+            }
+        }
     }
 
     // --- python ---
