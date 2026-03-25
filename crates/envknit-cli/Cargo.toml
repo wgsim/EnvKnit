@@ -1,6 +1,6 @@
 [package]
 name = "envknit-cli"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2021"
 description = "EnvKnit CLI — standalone binary for multi-version Python package management"
 license = "MIT"
@@ -24,9 +24,6 @@ thiserror = "1"
 colored = "2"
 chrono = { version = "0.4", features = ["serde"] }
 semver = { version = "1", features = ["serde"] }
-# TODO: reqwest is only used by the fallback built-in resolver (resolver.rs).
-# Remove when/if resolver.rs is deleted in a future cleanup pass.
-reqwest = { version = "0.12", features = ["blocking", "json", "rustls-tls"], default-features = false }
 indexmap = "2"
 dirs-next = "2"
 rayon = "1"
