@@ -503,14 +503,14 @@ fn lock_uv_with_dev_packages_marks_dev_flag() {
     std::env::set_current_dir(&prev).unwrap();
     assert!(result.is_ok(), "lock with dev_packages failed: {:?}", result);
 
-    let lock_content = std::fs::read_to_string(dir.join("envknit.lock.yaml")).unwrap();
-    assert!(lock_content.contains("requests"), "lock should contain prod package");
-    assert!(lock_content.contains("pytest"), "lock should contain dev package");
-    // pytest entry must be marked dev: true
-    assert!(
-        lock_content.contains("dev: true"),
-        "dev package should be marked dev: true in lock"
-    );
+    let lock = envknit_cli::lockfile::LockFile::load(&dir.join("envknit.lock.yaml")).unwrap();
+    let pkgs = lock.environments.get("default").expect("default env in lock");
+
+    let requests = pkgs.iter().find(|p| p.name == "requests").expect("requests in lock");
+    let pytest   = pkgs.iter().find(|p| p.name == "pytest").expect("pytest in lock");
+
+    assert!(!requests.dev, "requests (prod) must have dev=false");
+    assert!(pytest.dev,    "pytest (dev) must have dev=true");
 }
 
 // ── lock ──────────────────────────────────────────────────────────────────────
