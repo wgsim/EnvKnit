@@ -1,7 +1,6 @@
 use crate::config::Config;
 use crate::global_config::GlobalConfig;
 use crate::lockfile::{LockFile, LockedPackage, LOCK_FILE, LOCK_SCHEMA_VERSION};
-use crate::resolver::Resolver;
 use crate::uv_resolver;
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -30,12 +29,7 @@ pub fn run(update: Option<String>, dry_run: bool, env: Option<String>) -> Result
 
     println!("{} Resolving dependencies...", "→".cyan());
 
-    let uv_available = uv_resolver::find_uv().is_some();
-    let use_uv = uv_available;
-
-    if !uv_available {
-        eprintln!("{} uv not found on PATH — falling back to built-in resolver", "⚠".yellow());
-    }
+    uv_resolver::require_uv()?;
 
     let global_cfg = GlobalConfig::load().unwrap_or_default();
     let timeout = Duration::from_secs(global_cfg.subprocess_timeout_secs);
@@ -78,33 +72,11 @@ pub fn run(update: Option<String>, dry_run: bool, env: Option<String>) -> Result
             continue;
         }
 
-        let (mut resolved, mut dev_resolved) = if use_uv {
-            let prod_strings: Vec<String> = specs.iter().map(|s| s.to_uv_spec()).collect();
-            let dev_strings: Vec<String> = dev_specs.iter().map(|s| s.to_uv_spec()).collect();
-            let python_version = env_config.python_version.as_deref();
-            let (prod, dev) = uv_resolver::resolve(&prod_strings, &dev_strings, python_version, timeout)?;
-            (prod, dev)
-        } else {
-            let resolver = Resolver::new(dry_run);
-
-            let resolved = if !specs.is_empty() {
-                resolver.resolve(&specs)?
-            } else {
-                vec![]
-            };
-
-            let dev_resolved = if !dev_specs.is_empty() {
-                let mut dr = resolver.resolve(&dev_specs)?;
-                for pkg in &mut dr {
-                    pkg.dev = true;
-                }
-                dr
-            } else {
-                vec![]
-            };
-
-            (resolved, dev_resolved)
-        };
+        let prod_strings: Vec<String> = specs.iter().map(|s| s.to_uv_spec()).collect();
+        let dev_strings: Vec<String> = dev_specs.iter().map(|s| s.to_uv_spec()).collect();
+        let python_version = env_config.python_version.as_deref();
+        let (mut resolved, mut dev_resolved) =
+            uv_resolver::resolve(&prod_strings, &dev_strings, python_version, timeout)?;
 
         for pkg in resolved.iter().chain(dev_resolved.iter()) {
             let tag = if pkg.dev { " [dev]".dimmed() } else { "".normal() };
@@ -140,11 +112,7 @@ pub fn run(update: Option<String>, dry_run: bool, env: Option<String>) -> Result
         }
     }
 
-    lock.resolver_version = Some(if use_uv {
-        format!("uv/{}", uv_resolver::uv_version())
-    } else {
-        format!("envknit-builtin/{}", env!("CARGO_PKG_VERSION"))
-    });
+    lock.resolver_version = Some(format!("uv/{}", uv_resolver::uv_version()));
     lock.lock_generated_at = Some(Utc::now().to_rfc3339());
     lock.save(&lock_path)?;
 
