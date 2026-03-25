@@ -35,7 +35,7 @@ Minor version bumps are backwards-compatible. The current supported version is `
 ```yaml
 schema_version: "1.0"
 lock_generated_at: "2024-01-15T10:30:00Z"
-resolver_version: "2.1.0"
+resolver_version: "uv/0.10.7"           # or "envknit-builtin/0.1.2"
 packages: []                          # legacy flat list (usually empty)
 environments:
   default:
@@ -76,7 +76,7 @@ environments:
 |---|---|---|
 | `schema_version` | `string` | Always `"1.0"`. Used for compatibility gating. |
 | `lock_generated_at` | `string \| null` | ISO 8601 timestamp of when `envknit lock` ran. Omitted if not set. |
-| `resolver_version` | `string \| null` | CLI version that generated this lock file (e.g., `"2.1.0"`). Omitted if not set. |
+| `resolver_version` | `string \| null` | Resolver that generated this lock file. Format: `"uv/<version>"` (e.g., `"uv/0.10.7"`) when uv is on PATH, or `"envknit-builtin/<version>"` (e.g., `"envknit-builtin/0.1.2"`) otherwise. Omitted if not set. |
 | `packages` | `array` | Legacy flat package list. Present for backwards compatibility; typically empty when `environments` is populated. |
 | `environments` | `object` | Map of environment name to list of `LockedPackage` entries. This is the primary data. |
 
@@ -144,7 +144,7 @@ The Python library (`envknit.configure_from_lock()`) reads only a subset of fiel
 ```yaml
 schema_version: "1.0"
 lock_generated_at: "2024-01-15T10:30:00Z"
-resolver_version: "2.1.0"
+resolver_version: "uv/0.10.7"
 packages: []
 environments:
   default:
