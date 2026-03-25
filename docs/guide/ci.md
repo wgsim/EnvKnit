@@ -100,18 +100,23 @@ cache:
 before_script:
   - curl -L https://github.com/wgsim/EnvKnit/releases/latest/download/envknit-linux-amd64 -o /usr/local/bin/envknit
   - chmod +x /usr/local/bin/envknit
+  # Override package store to a CI-cacheable directory via ~/.envknit/config.yaml
+  - mkdir -p "$CI_PROJECT_DIR/.envknit-cache"
+  - mkdir -p ~/.envknit
+  - printf 'store_dir: "%s/.envknit-cache"\n' "$CI_PROJECT_DIR" > ~/.envknit/config.yaml
 
 test:
   script:
     - envknit check
-    - ENVKNIT_STORE_DIR="$ENVKNIT_CACHE_DIR" envknit install --no-dev --auto-cleanup
-    - ENVKNIT_STORE_DIR="$ENVKNIT_CACHE_DIR" envknit verify
-    - ENVKNIT_STORE_DIR="$ENVKNIT_CACHE_DIR" envknit run -- python -m pytest
+    - envknit install --no-dev --auto-cleanup
+    - envknit verify
+    - envknit run -- python -m pytest
 ```
 
-Note: `ENVKNIT_STORE_DIR` overrides the default `~/.envknit/packages/` to a
-project-local directory that GitLab CI can cache. Check the CLI reference for
-environment variable support.
+Note: The `store_dir` field in `~/.envknit/config.yaml` overrides the default
+`~/.envknit/packages/` to a project-local directory that GitLab CI can cache.
+There is no `ENVKNIT_STORE_DIR` environment variable; the config file is the
+only way to change the store path.
 
 ---
 
