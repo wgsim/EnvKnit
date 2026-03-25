@@ -123,6 +123,7 @@ defaults.
 | `node_version_manager` | `string` | None (auto-detect) | Force a specific Node.js version manager. Accepted values: `"mise"`, `"fnm"`, `"nvm"`. When omitted, EnvKnit auto-detects the available manager. |
 | `cache_ttl_secs` | `integer (u64)` | `300` | PyPI metadata cache TTL in seconds. Set to `0` to disable caching. |
 | `parallel_jobs` | `integer (usize)` | `4` | Number of parallel pip workers used during `install`. |
+| `subprocess_timeout_secs` | `integer (u64)` | `300` | Timeout in seconds for subprocess calls (`uv pip compile`, `pip install`). Set to `0` to disable the timeout. |
 
 ### Complete `~/.envknit/config.yaml` Example
 
@@ -133,6 +134,7 @@ store_dir: /data/envknit/packages
 node_version_manager: fnm
 cache_ttl_secs: 600
 parallel_jobs: 8
+subprocess_timeout_secs: 300
 ```
 
 ---
@@ -147,5 +149,5 @@ config:
    only takes effect when the corresponding project field is absent or not set.
 
 Fields that exist only in the global config (`store_dir`, `cache_ttl_secs`,
-`parallel_jobs`, `node_version_manager`) are not overridable per-project and
-always come from the global config.
+`parallel_jobs`, `node_version_manager`, `subprocess_timeout_secs`) are not
+overridable per-project and always come from the global config.
