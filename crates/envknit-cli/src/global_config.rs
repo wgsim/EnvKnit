@@ -149,6 +149,7 @@ mod tests {
             node_version_manager: None,
             cache_ttl_secs: 600,
             parallel_jobs: 8,
+            subprocess_timeout_secs: 120,
         };
         let yaml = serde_yaml::to_string(&cfg).unwrap();
         let loaded: GlobalConfig = serde_yaml::from_str(&yaml).unwrap();

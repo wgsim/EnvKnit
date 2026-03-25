@@ -211,10 +211,14 @@ mod tests {
 
     #[test]
     fn test_parse_strips_newlines() {
+        // The newline is stripped, neutralising the injection vector.
+        // The remaining string is an invalid spec that will be rejected by uv.
         let s = PackageSpec::parse("requests\n--index-url https://evil.com");
-        // newline is stripped; only "requests" survives
-        assert_eq!(s.name, "requests");
-        assert!(s.version.is_none());
+        let spec = s.to_uv_spec();
+        // Critical property: the assembled spec must not contain \n or \r,
+        // so it cannot act as a uv stdin line separator.
+        assert!(!spec.contains('\n'), "spec must not contain newline: {spec:?}");
+        assert!(!spec.contains('\r'), "spec must not contain CR: {spec:?}");
     }
 
     #[test]

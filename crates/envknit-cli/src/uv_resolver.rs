@@ -233,7 +233,7 @@ mod tests {
         // A spec with an embedded newline must be rejected before reaching uv.
         let bad_specs = vec!["requests\n--index-url https://evil.com".to_string()];
         // resolve_set is private; test via the public resolve() instead.
-        let result = resolve(&bad_specs, &[], None);
+        let result = resolve(&bad_specs, &[], None, Duration::ZERO);
         assert!(result.is_err());
         let msg = format!("{}", result.unwrap_err());
         assert!(msg.contains("newline"), "error should mention newline, got: {}", msg);

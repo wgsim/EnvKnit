@@ -11,7 +11,7 @@ use std::time::Duration;
 ///
 /// Pass `timeout = Duration::ZERO` (or any zero duration) to disable the
 /// timeout and wait indefinitely — equivalent to `child.wait_with_output()`.
-pub fn wait_output_timeout(mut child: Child, timeout: Duration) -> Result<Output> {
+pub fn wait_output_timeout(child: Child, timeout: Duration) -> Result<Output> {
     if timeout.is_zero() {
         return child.wait_with_output().map_err(Into::into);
     }
