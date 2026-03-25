@@ -2,12 +2,15 @@ use crate::config::Config;
 use crate::global_config::GlobalConfig;
 use crate::lockfile::{LockedPackage, LockFile};
 use crate::node_resolver;
+use crate::process_util::wait_output_timeout;
 use crate::python_resolver;
 use anyhow::{Context, Result};
 use colored::Colorize;
 use rayon::prelude::*;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::time::Duration;
 
 pub fn run(env: Option<String>, no_dev: bool, auto_cleanup: bool) -> Result<()> {
     let lock_path = LockFile::find(Path::new("."))
@@ -16,6 +19,9 @@ pub fn run(env: Option<String>, no_dev: bool, auto_cleanup: bool) -> Result<()> 
 
     // Load config to resolve python_version per environment (best-effort)
     let config = Config::find(Path::new(".")).and_then(|p| Config::load(&p).ok());
+    let timeout = Duration::from_secs(
+        GlobalConfig::load().unwrap_or_default().subprocess_timeout_secs
+    );
 
     let env_display = env.as_deref().unwrap_or("all");
     println!(
@@ -35,7 +41,7 @@ pub fn run(env: Option<String>, no_dev: bool, auto_cleanup: bool) -> Result<()> 
         let pkgs: Vec<_> = lock.packages.iter_mut()
             .filter(|p| !no_dev || !p.dev)
             .collect();
-        install_packages_mut(pkgs, "default", default_pip())?;
+        install_packages_mut(pkgs, "default", default_pip(), timeout)?;
     } else {
         for env_name in &envs_to_install {
             println!("  Environment: {}", env_name.bold());
@@ -69,7 +75,7 @@ pub fn run(env: Option<String>, no_dev: bool, auto_cleanup: bool) -> Result<()> 
                 .get_mut(env_name)
                 .map(|v| v.iter_mut().filter(|p| !no_dev || !p.dev).collect())
                 .unwrap_or_default();
-            install_packages_mut(pkgs, env_name, pip_cmd)?;
+            install_packages_mut(pkgs, env_name, pip_cmd, timeout)?;
         }
     }
 
@@ -120,7 +126,7 @@ fn resolve_pip_for_env(env_name: &str, config: &Option<Config>) -> Vec<String> {
 /// Install a batch of packages, running new installs in parallel via rayon.
 /// Already-cached packages are identified first (sequential), then new packages
 /// are installed concurrently.
-fn install_packages_mut(mut packages: Vec<&mut LockedPackage>, _env_name: &str, pip_cmd: Vec<String>) -> Result<()> {
+fn install_packages_mut(mut packages: Vec<&mut LockedPackage>, _env_name: &str, pip_cmd: Vec<String>, timeout: Duration) -> Result<()> {
     let global_cfg = GlobalConfig::load().unwrap_or_default();
     let store_base = global_cfg.effective_store_dir();
     // Apply parallel job limit from global config.
@@ -162,15 +168,25 @@ fn install_packages_mut(mut packages: Vec<&mut LockedPackage>, _env_name: &str, 
             let (prog, base_args) = pip_cmd.split_first()
                 .map(|(p, a)| (p.as_str(), a))
                 .unwrap_or(("pip", &[]));
-            let output = std::process::Command::new(prog)
+            let child = std::process::Command::new(prog)
                 .args(base_args)
                 .args(["install", "--target", &install_dir.to_string_lossy(), &spec, "--quiet"])
-                .output();
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn();
 
-            match output {
+            let child = match child {
                 Err(e) => {
                     let _ = std::fs::remove_dir_all(&install_dir);
-                    (i, install_dir, Err(format!("pip exec failed: {}", e)))
+                    return (i, install_dir, Err(format!("pip exec failed: {}", e)));
+                }
+                Ok(c) => c,
+            };
+
+            match wait_output_timeout(child, timeout) {
+                Err(e) => {
+                    let _ = std::fs::remove_dir_all(&install_dir);
+                    (i, install_dir, Err(e.to_string()))
                 }
                 Ok(out) if out.status.success() => (i, install_dir, Ok(())),
                 Ok(out) => {

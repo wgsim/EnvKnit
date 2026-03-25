@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::global_config::GlobalConfig;
 use crate::lockfile::{LockFile, LockedPackage, LOCK_FILE, LOCK_SCHEMA_VERSION};
 use crate::resolver::Resolver;
 use crate::uv_resolver;
@@ -7,6 +8,7 @@ use chrono::Utc;
 use colored::Colorize;
 use std::collections::HashMap;
 use std::path::Path;
+use std::time::Duration;
 
 pub fn run(update: Option<String>, dry_run: bool, env: Option<String>) -> Result<()> {
     let config_path = Config::find(Path::new("."))
@@ -34,6 +36,9 @@ pub fn run(update: Option<String>, dry_run: bool, env: Option<String>) -> Result
     if !uv_available {
         eprintln!("{} uv not found on PATH — falling back to built-in resolver", "⚠".yellow());
     }
+
+    let global_cfg = GlobalConfig::load().unwrap_or_default();
+    let timeout = Duration::from_secs(global_cfg.subprocess_timeout_secs);
 
     let mut env_packages: HashMap<String, Vec<LockedPackage>> = HashMap::new();
 
@@ -77,7 +82,7 @@ pub fn run(update: Option<String>, dry_run: bool, env: Option<String>) -> Result
             let prod_strings: Vec<String> = specs.iter().map(|s| s.to_uv_spec()).collect();
             let dev_strings: Vec<String> = dev_specs.iter().map(|s| s.to_uv_spec()).collect();
             let python_version = env_config.python_version.as_deref();
-            let (prod, dev) = uv_resolver::resolve(&prod_strings, &dev_strings, python_version)?;
+            let (prod, dev) = uv_resolver::resolve(&prod_strings, &dev_strings, python_version, timeout)?;
             (prod, dev)
         } else {
             let resolver = Resolver::new(dry_run);
