@@ -107,6 +107,24 @@ fn resolve_set(specs: &[String], python_version: Option<&str>, context: &str) ->
     Ok(parse_uv_output(&stdout))
 }
 
+/// Resolve prod and dev dependency sets via uv pip compile.
+///
+/// Two separate `uv pip compile` invocations are used intentionally:
+///
+/// 1. **Prod-only** (`specs`): resolves the production closure. This is the canonical
+///    set — the packages that will be installed in non-dev environments.
+///
+/// 2. **Prod+dev combined** (`specs + dev_specs`): uv resolves the full closure
+///    including dev packages. Packages not already in the prod set are tagged as
+///    `dev = true` and returned separately. This approach ensures dev deps are resolved
+///    against the same prod versions (no silent downgrades), while still allowing the
+///    caller to strip dev packages from production installs.
+///
+/// The two invocations may select different versions for a package that appears in both
+/// closures when dev deps introduce additional constraints. The prod-set versions are
+/// canonical: any package present in both the prod and combined closures uses the version
+/// from the prod invocation. Dev-only packages are identified by set-subtraction on prod
+/// package names — anything in the combined closure that is not in prod by name.
 pub fn resolve(
     specs: &[String],
     dev_specs: &[String],
@@ -121,10 +139,6 @@ pub fn resolve(
 
     let mut combined = specs.to_vec();
     combined.extend_from_slice(dev_specs);
-
-    // Note: two separate uv invocations may select slightly different versions for shared
-    // packages when dev deps introduce additional constraints. In that case prod_packages
-    // takes precedence; dev-only packages are the remainder not present in prod by name.
     let all = resolve_set(&combined, python_version, "prod+dev")?;
 
     let dev_only: Vec<LockedPackage> = all

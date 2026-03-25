@@ -88,6 +88,17 @@ impl Config {
 }
 
 impl PackageSpec {
+    /// Format as a PEP 508 spec string for uv: `name[extras]version`.
+    /// Examples: `"requests"`, `"requests>=2.28"`, `"requests[security]>=2.28"`.
+    pub fn to_uv_spec(&self) -> String {
+        let extras = if self.extras.is_empty() {
+            String::new()
+        } else {
+            format!("[{}]", self.extras.join(","))
+        };
+        format!("{}{}{}", self.name, extras, self.version.as_deref().unwrap_or(""))
+    }
+
     /// Parse "name==1.0", "name>=1.0,<2.0", or plain "name"
     pub fn parse(spec: &str) -> Self {
         for op in ["==", ">=", "<=", "!=", "~=", ">", "<"] {
@@ -123,6 +134,38 @@ mod tests {
         ));
         fs::create_dir_all(&base).unwrap();
         base
+    }
+
+    #[test]
+    fn test_to_uv_spec_name_only() {
+        let s = PackageSpec { name: "numpy".to_string(), version: None, extras: vec![] };
+        assert_eq!(s.to_uv_spec(), "numpy");
+    }
+
+    #[test]
+    fn test_to_uv_spec_with_version() {
+        let s = PackageSpec { name: "requests".to_string(), version: Some(">=2.28".to_string()), extras: vec![] };
+        assert_eq!(s.to_uv_spec(), "requests>=2.28");
+    }
+
+    #[test]
+    fn test_to_uv_spec_with_extras() {
+        let s = PackageSpec {
+            name: "requests".to_string(),
+            version: Some(">=2.28".to_string()),
+            extras: vec!["security".to_string(), "socks".to_string()],
+        };
+        assert_eq!(s.to_uv_spec(), "requests[security,socks]>=2.28");
+    }
+
+    #[test]
+    fn test_to_uv_spec_extras_no_version() {
+        let s = PackageSpec {
+            name: "requests".to_string(),
+            version: None,
+            extras: vec!["security".to_string()],
+        };
+        assert_eq!(s.to_uv_spec(), "requests[security]");
     }
 
     #[test]
