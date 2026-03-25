@@ -103,7 +103,7 @@ before_script:
   # Override package store to a CI-cacheable directory via ~/.envknit/config.yaml
   - mkdir -p "$CI_PROJECT_DIR/.envknit-cache"
   - mkdir -p ~/.envknit
-  - printf 'store_dir: "%s/.envknit-cache"\n' "$CI_PROJECT_DIR" > ~/.envknit/config.yaml
+  - printf 'store_dir: "%s"\n' "$ENVKNIT_CACHE_DIR" > ~/.envknit/config.yaml
 
 test:
   script:
