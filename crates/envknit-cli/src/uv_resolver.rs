@@ -315,4 +315,17 @@ mod tests {
         }
         assert!(require_uv().is_ok());
     }
+
+    #[test]
+    fn require_uv_fails_when_uv_absent() {
+        let _guard = PATH_MUTEX.lock().unwrap();
+        // Temporarily replace PATH with an empty value so uv cannot be found.
+        let original = std::env::var("PATH").unwrap_or_default();
+        std::env::set_var("PATH", "");
+        let result = require_uv();
+        std::env::set_var("PATH", original);
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("uv is required"), "got: {}", msg);
+    }
 }
