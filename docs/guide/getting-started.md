@@ -46,7 +46,7 @@ rename it to `envknit.exe`, and place it on your `PATH`.
 
 ```bash
 envknit --version
-# envknit 2.1.0
+# envknit 0.1.2
 ```
 
 ### Shell Completion
@@ -263,7 +263,8 @@ default
 
 1. `envknit init` created `envknit.yaml` — the dependency specification file.
 2. `envknit add` added package specs to `envknit.yaml`.
-3. `envknit lock` resolved exact versions using a backtracking SAT resolver and wrote
+3. `envknit lock` resolved exact versions (delegating to `uv pip compile` when uv is on
+   PATH, or falling back to the built-in resolver otherwise) and wrote
    `envknit.lock.yaml`. No packages were installed yet.
 4. `envknit install` read `envknit.lock.yaml` and installed each package into
    `~/.envknit/packages/<name>/<version>/` using `pip install --target`.
