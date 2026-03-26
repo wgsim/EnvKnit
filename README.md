@@ -19,7 +19,7 @@ With one `envknit.yaml`, you can cleanly define and switch between multiple, iso
 - **Multi-Environment Management**: Define multiple environments in a single project. Switch seamlessly between a `default` backend env and an `ml` env with different dependencies.
 - **Global Package Store**: Packages are installed exactly once in `~/.envknit/packages/` and shared across all projects. Say goodbye to gigabytes of duplicated `.venv` folders.
 - **Unified Toolchain**: Natively respects `python_version` and `node_version` configurations via integrations with tools like `mise`, `fnm`, and `pyenv`.
-- **uv-Accelerated Resolution**: `envknit lock` delegates to [`uv pip compile`](https://docs.astral.sh/uv/) when uv is on PATH, with automatic fallback to the built-in resolver. The resolver used is recorded in `envknit.lock.yaml`.
+- **uv-Powered**: `envknit lock` and `envknit install` both delegate to [`uv`](https://docs.astral.sh/uv/) — required as of v0.2.0. The resolver version is recorded in `envknit.lock.yaml`.
 - **Rust-Powered CLI**: Fast, deterministic lock file generation distributed as a single self-contained binary via GitHub Releases.
 - **Transparent Execution**: Run tools with `envknit run -- <command>` to automatically inject the correct environment paths into `PYTHONPATH` or `PATH`.
 
@@ -42,7 +42,7 @@ envknit add "numpy>=1.24,<2.0" --env ml
 ```
 
 ### 2. Lock and Install
-Resolve dependencies (via uv when available) and install them to the global store.
+Resolve dependencies and install them to the global store (both powered by uv).
 
 ```bash
 envknit lock

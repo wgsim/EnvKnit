@@ -4,6 +4,7 @@ use crate::lockfile::{LockedPackage, LockFile};
 use crate::node_resolver;
 use crate::process_util::wait_output_timeout;
 use crate::python_resolver;
+use crate::uv_resolver;
 use anyhow::{Context, Result};
 use colored::Colorize;
 use rayon::prelude::*;
@@ -16,6 +17,10 @@ pub fn run(env: Option<String>, no_dev: bool, auto_cleanup: bool) -> Result<()> 
     let lock_path = LockFile::find(Path::new("."))
         .context("No envknit.lock.yaml found. Run `envknit lock` first.")?;
     let mut lock = LockFile::load(&lock_path)?;
+
+    // uv is required for install (same as lock)
+    uv_resolver::require_uv()?;
+    let uv_path = uv_resolver::find_uv().expect("uv present after require_uv");
 
     // Load config to resolve python_version per environment (best-effort)
     let config = Config::find(Path::new(".")).and_then(|p| Config::load(&p).ok());
@@ -41,13 +46,12 @@ pub fn run(env: Option<String>, no_dev: bool, auto_cleanup: bool) -> Result<()> 
         let pkgs: Vec<_> = lock.packages.iter_mut()
             .filter(|p| !no_dev || !p.dev)
             .collect();
-        install_packages_mut(pkgs, "default", default_pip(), timeout)?;
+        install_packages_mut(pkgs, "default", &uv_path, None, timeout)?;
     } else {
         for env_name in &envs_to_install {
             println!("  Environment: {}", env_name.bold());
 
-            // Resolve pip command for this environment's python_version
-            let pip_cmd = resolve_pip_for_env(env_name, &config);
+            let python_path = resolve_python_for_env(env_name, &config);
 
             // Warn if node_version is configured but cannot be resolved (non-blocking)
             if let Some(env_cfg) = config.as_ref().and_then(|c| c.environments.get(env_name)) {
@@ -75,7 +79,7 @@ pub fn run(env: Option<String>, no_dev: bool, auto_cleanup: bool) -> Result<()> 
                 .get_mut(env_name)
                 .map(|v| v.iter_mut().filter(|p| !no_dev || !p.dev).collect())
                 .unwrap_or_default();
-            install_packages_mut(pkgs, env_name, pip_cmd, timeout)?;
+            install_packages_mut(pkgs, env_name, &uv_path, python_path, timeout)?;
         }
     }
 
@@ -90,53 +94,46 @@ pub fn run(env: Option<String>, no_dev: bool, auto_cleanup: bool) -> Result<()> 
     Ok(())
 }
 
-fn default_pip() -> Vec<String> {
-    vec!["pip".to_string()]
-}
-
-fn resolve_pip_for_env(env_name: &str, config: &Option<Config>) -> Vec<String> {
-    let python_version = config
+/// Return the resolved Python interpreter path for an environment, if python_version is set.
+/// Logs a warning and returns None on resolution failure.
+fn resolve_python_for_env(env_name: &str, config: &Option<Config>) -> Option<PathBuf> {
+    let ver = config
         .as_ref()
         .and_then(|c| c.environments.get(env_name))
-        .and_then(|e| e.python_version.as_deref());
+        .and_then(|e| e.python_version.as_deref())?;
 
-    if let Some(ver) = python_version {
-        match python_resolver::resolve_python(ver) {
-            Ok(python_path) => {
-                let args = python_resolver::pip_args(&python_path);
-                println!(
-                    "  {} Using Python {} for env '{}'",
-                    "→".cyan(),
-                    ver,
-                    env_name
-                );
-                return args;
-            }
-            Err(e) => {
-                eprintln!(
-                    "  {} Could not resolve Python {}: {} — falling back to system pip",
-                    "!".yellow(), ver, e
-                );
-            }
+    match python_resolver::resolve_python(ver) {
+        Ok(path) => {
+            println!("  {} Using Python {} for env '{}'", "→".cyan(), ver, env_name);
+            Some(path)
+        }
+        Err(e) => {
+            eprintln!(
+                "  {} Could not resolve Python {}: {} — falling back to uv default",
+                "!".yellow(), ver, e
+            );
+            None
         }
     }
-    default_pip()
 }
 
-/// Install a batch of packages, running new installs in parallel via rayon.
-/// Already-cached packages are identified first (sequential), then new packages
-/// are installed concurrently.
-fn install_packages_mut(mut packages: Vec<&mut LockedPackage>, _env_name: &str, pip_cmd: Vec<String>, timeout: Duration) -> Result<()> {
+/// Install a batch of packages using `uv pip install --target`.
+/// Already-cached packages are identified first, then new packages are installed in parallel.
+fn install_packages_mut(
+    mut packages: Vec<&mut LockedPackage>,
+    _env_name: &str,
+    uv_path: &Path,
+    python_path: Option<PathBuf>,
+    timeout: Duration,
+) -> Result<()> {
     let global_cfg = GlobalConfig::load().unwrap_or_default();
     let store_base = global_cfg.effective_store_dir();
-    // Apply parallel job limit from global config.
     rayon::ThreadPoolBuilder::new()
         .num_threads(global_cfg.parallel_jobs)
         .build_global()
-        .unwrap_or(());  // Ignore error if pool already initialized.
+        .unwrap_or(());
     std::fs::create_dir_all(&store_base)?;
 
-    // Split into already-handled and needs-install
     let mut to_install: Vec<(usize, String, String, PathBuf)> = Vec::new();
 
     for (i, pkg) in packages.iter().enumerate() {
@@ -147,13 +144,12 @@ fn install_packages_mut(mut packages: Vec<&mut LockedPackage>, _env_name: &str, 
         let install_dir = store_base
             .join(pkg.name.to_lowercase())
             .join(&pkg.version);
-        if install_dir.exists() {
-            // Already on disk — just update path (done below after parallel phase)
-        }
         to_install.push((i, pkg.name.clone(), pkg.version.clone(), install_dir));
     }
 
-    // Parallel install: each entry is (index, name, version, dir)
+    let uv_path = uv_path.to_path_buf();
+    let python_path = python_path.map(|p| p.to_string_lossy().into_owned());
+
     let results: Vec<(usize, PathBuf, Result<(), String>)> = to_install
         .into_par_iter()
         .map(|(i, name, version, install_dir)| {
@@ -165,20 +161,21 @@ fn install_packages_mut(mut packages: Vec<&mut LockedPackage>, _env_name: &str, 
             }
 
             let spec = format!("{}=={}", name, version);
-            let (prog, base_args) = pip_cmd.split_first()
-                .map(|(p, a)| (p.as_str(), a))
-                .unwrap_or(("pip", &[]));
-            let child = std::process::Command::new(prog)
-                .args(base_args)
-                .args(["install", "--target", &install_dir.to_string_lossy(), &spec, "--quiet"])
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn();
 
-            let child = match child {
+            // uv pip install [--python <py>] --target <dir> <spec> --quiet
+            let mut cmd = std::process::Command::new(&uv_path);
+            cmd.args(["pip", "install"]);
+            if let Some(ref py) = python_path {
+                cmd.args(["--python", py]);
+            }
+            cmd.args(["--target", &install_dir.to_string_lossy(), &spec, "--quiet"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+
+            let child = match cmd.spawn() {
                 Err(e) => {
                     let _ = std::fs::remove_dir_all(&install_dir);
-                    return (i, install_dir, Err(format!("pip exec failed: {}", e)));
+                    return (i, install_dir, Err(format!("uv exec failed: {}", e)));
                 }
                 Ok(c) => c,
             };
@@ -198,16 +195,15 @@ fn install_packages_mut(mut packages: Vec<&mut LockedPackage>, _env_name: &str, 
         })
         .collect();
 
-    // Apply results back to packages and report
     let mut first_err: Option<String> = None;
     for (i, install_dir, outcome) in results {
         let pkg = &mut packages[i];
         match outcome {
             Ok(()) => {
-                let path_str = install_dir.to_string_lossy().to_string();
-                pkg.install_path = Some(path_str.clone());
+                let was_cached = install_dir.exists()
+                    && pkg.install_path.is_none();
+                pkg.install_path = Some(install_dir.to_string_lossy().to_string());
                 pkg.sha256 = Some(hash_dir(&install_dir));
-                let was_cached = install_dir.exists();
                 if was_cached {
                     println!("    {} {}=={} (found at {:?})", "✓".green(), pkg.name, pkg.version, install_dir);
                 } else {
@@ -217,7 +213,7 @@ fn install_packages_mut(mut packages: Vec<&mut LockedPackage>, _env_name: &str, 
             Err(e) => {
                 println!("    {} {}=={} {}", "✗".red(), pkg.name, pkg.version, "FAILED".red());
                 if first_err.is_none() {
-                    first_err = Some(format!("pip install failed for {}=={}: {}", pkg.name, pkg.version, e));
+                    first_err = Some(format!("uv pip install failed for {}=={}: {}", pkg.name, pkg.version, e));
                 }
             }
         }
@@ -231,7 +227,6 @@ fn install_packages_mut(mut packages: Vec<&mut LockedPackage>, _env_name: &str, 
 }
 
 /// Compute a deterministic SHA-256 of a directory tree.
-/// Files are sorted by path so the hash is stable across runs.
 pub fn hash_dir(dir: &PathBuf) -> String {
     let mut hasher = Sha256::new();
     let mut paths: Vec<PathBuf> = Vec::new();
