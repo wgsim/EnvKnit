@@ -14,3 +14,8 @@ pub mod uv_resolver;
 /// All CWD-sensitive tests must hold this lock to avoid parallel interference.
 #[cfg(test)]
 pub static GLOBAL_CWD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Shared mutex for tests that mutate PATH. All PATH-sensitive tests must hold
+/// this lock to prevent parallel test interference.
+#[cfg(test)]
+pub static GLOBAL_PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

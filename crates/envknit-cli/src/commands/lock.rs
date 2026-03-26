@@ -125,7 +125,7 @@ fn new_lockfile() -> LockFile {
     LockFile {
         schema_version: LOCK_SCHEMA_VERSION.to_string(),
         lock_generated_at: None,
-        resolver_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+        resolver_version: None,
         packages: vec![],
         environments: HashMap::new(),
     }

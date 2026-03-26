@@ -140,9 +140,10 @@ fn resolve_set(specs: &[String], python_version: Option<&str>, context: &str, ti
         .stderr(Stdio::piped());
 
     let mut child = cmd.spawn()?;
-    if let Some(stdin) = child.stdin.take() {
-        let mut stdin = stdin;
-        stdin.write_all(specs.join("\n").as_bytes())?;
+    if let Some(mut stdin) = child.stdin.take() {
+        let result = stdin.write_all(specs.join("\n").as_bytes());
+        drop(stdin); // close pipe unconditionally before propagating error
+        result?;
     }
     let output = wait_output_timeout(child, timeout)?;
     if !output.status.success() {
@@ -226,7 +227,6 @@ mod tests {
 
     // Serialises PATH mutations across all tests in this module.
     // Callers must also pass `-- --test-threads=1` to prevent races with tests in other modules.
-    static PATH_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn parse_uv_output_basic() {
@@ -256,7 +256,7 @@ mod tests {
 
     #[test]
     fn find_uv_returns_none_with_empty_path() {
-        let _guard = PATH_MUTEX.lock().unwrap();
+        let _guard = crate::GLOBAL_PATH_LOCK.lock().unwrap();
         let orig = std::env::var("PATH").unwrap_or_default();
         std::env::set_var("PATH", "");
         let result = find_uv();
@@ -309,7 +309,7 @@ mod tests {
 
     #[test]
     fn require_uv_succeeds_when_uv_present() {
-        // This test requires uv to be on PATH. If uv is missing, skip.
+        let _guard = crate::GLOBAL_PATH_LOCK.lock().unwrap();
         if find_uv().is_none() {
             return;
         }
@@ -318,7 +318,7 @@ mod tests {
 
     #[test]
     fn require_uv_fails_when_uv_absent() {
-        let _guard = PATH_MUTEX.lock().unwrap();
+        let _guard = crate::GLOBAL_PATH_LOCK.lock().unwrap();
         // Temporarily replace PATH with an empty value so uv cannot be found.
         let original = std::env::var("PATH").unwrap_or_default();
         std::env::set_var("PATH", "");
