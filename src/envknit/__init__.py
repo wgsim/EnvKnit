@@ -40,6 +40,11 @@ from envknit.isolation.import_hook import (
     set_default,
     use,
 )
+from envknit.isolation.context_propagation import (
+    ContextExecutor,
+    ContextThread,
+    context_wrap,
+)
 from envknit.isolation.worker import (
     ProcessPool,
     WorkerContext,
@@ -59,6 +64,10 @@ __all__ = [
     "set_default",
     "configure_from_lock",
     "get_manager",
+    # Threading context propagation (opt-in)
+    "context_wrap",
+    "ContextThread",
+    "ContextExecutor",
     # Subprocess worker pool API (C extensions / Category B packages)
     "worker",
     # Hybrid auto-detection + errors

@@ -6,7 +6,7 @@ import threading
 
 import pytest
 
-from envknit.isolation.context_propagation import context_wrap, ContextThread, ContextExecutor
+from envknit import context_wrap, ContextThread, ContextExecutor
 
 _test_var: contextvars.ContextVar[str] = contextvars.ContextVar("_test_var", default="none")
 
