@@ -15,7 +15,7 @@ pytestmark = pytest.mark.skipif(
     reason="Sub-interpreters require Python 3.12+ with _interpreters module"
 )
 
-from envknit.isolation.subinterpreter import SubInterpreterEnv, CExtIncompatibleError
+from envknit import SubInterpreterEnv, CExtIncompatibleError
 
 
 def test_try_import_stdlib_module_returns_true():

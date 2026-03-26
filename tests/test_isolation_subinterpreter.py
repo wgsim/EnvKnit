@@ -15,7 +15,7 @@ pytestmark = pytest.mark.skipif(
     reason="Sub-interpreters require Python 3.12+ with _interpreters module"
 )
 
-from envknit.isolation.subinterpreter import SubInterpreterEnv, UnsupportedPlatformError
+from envknit import SubInterpreterEnv, UnsupportedPlatformError
 
 
 def test_subinterpreter_context_manager():

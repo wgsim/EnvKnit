@@ -45,6 +45,11 @@ from envknit.isolation.context_propagation import (
     ContextThread,
     context_wrap,
 )
+from envknit.isolation.subinterpreter import (
+    CExtIncompatibleError,
+    SubInterpreterEnv,
+    UnsupportedPlatformError,
+)
 from envknit.isolation.worker import (
     ProcessPool,
     WorkerContext,
@@ -68,6 +73,10 @@ __all__ = [
     "context_wrap",
     "ContextThread",
     "ContextExecutor",
+    # Sub-interpreter strict isolation (Python 3.12+)
+    "SubInterpreterEnv",
+    "UnsupportedPlatformError",
+    "CExtIncompatibleError",
     # Subprocess worker pool API (C extensions / Category B packages)
     "worker",
     # Hybrid auto-detection + errors
