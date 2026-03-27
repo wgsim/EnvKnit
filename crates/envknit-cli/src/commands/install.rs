@@ -136,14 +136,18 @@ fn install_packages_mut(
 
     let mut to_install: Vec<(usize, String, String, PathBuf)> = Vec::new();
 
+    // Track which packages were already recorded (to distinguish output later)
+    let mut already_recorded: Vec<bool> = Vec::with_capacity(packages.len());
+
     for (i, pkg) in packages.iter().enumerate() {
-        if pkg.install_path.is_some() {
+        let install_dir = if let Some(ref p) = pkg.install_path {
+            already_recorded.push(true);
             println!("    {} {}=={} (cached)", "→".cyan(), pkg.name, pkg.version);
-            continue;
-        }
-        let install_dir = store_base
-            .join(pkg.name.to_lowercase())
-            .join(&pkg.version);
+            PathBuf::from(p)
+        } else {
+            already_recorded.push(false);
+            store_base.join(pkg.name.to_lowercase()).join(&pkg.version)
+        };
         to_install.push((i, pkg.name.clone(), pkg.version.clone(), install_dir));
     }
 
@@ -200,11 +204,13 @@ fn install_packages_mut(
         let pkg = &mut packages[i];
         match outcome {
             Ok(()) => {
-                let was_cached = install_dir.exists()
-                    && pkg.install_path.is_none();
+                let prev_recorded = already_recorded[i];
+                let was_on_disk = install_dir.exists();
                 pkg.install_path = Some(install_dir.to_string_lossy().to_string());
                 pkg.sha256 = Some(hash_dir(&install_dir));
-                if was_cached {
+                if prev_recorded {
+                    // Was already in lockfile — just rehashed, no output needed (already printed "(cached)")
+                } else if was_on_disk {
                     println!("    {} {}=={} (found at {:?})", "✓".green(), pkg.name, pkg.version, install_dir);
                 } else {
                     println!("    {} {}=={} {}", "✓".green(), pkg.name, pkg.version, "installed".green());
@@ -236,8 +242,16 @@ pub fn hash_dir(dir: &PathBuf) -> String {
             for entry in entries.flatten() {
                 let p = entry.path();
                 if p.is_dir() {
+                    // Skip __pycache__ — runtime-generated, not part of installed package
+                    if p.file_name().map_or(false, |n| n == "__pycache__") {
+                        continue;
+                    }
                     collect(&p, out);
                 } else {
+                    // Skip .pyc files — bytecode cache, regenerated at import time
+                    if p.extension().map_or(false, |e| e == "pyc") {
+                        continue;
+                    }
                     out.push(p);
                 }
             }
