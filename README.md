@@ -6,74 +6,111 @@
 [![Python API](https://img.shields.io/badge/API-Python_3.10+-blue.svg)](https://www.python.org/)
 [![CI](https://github.com/wgsim/EnvKnit/actions/workflows/test.yml/badge.svg)](https://github.com/wgsim/EnvKnit/actions)
 
-> **Multi-environment package manager for Python and Node.js.**
+> **In-process multi-version isolation for Python — use conflicting package versions in the same process, without subprocesses or virtual environments.**
 
-EnvKnit provides a modern alternative to traditional virtual environments (`venv`). Instead of creating redundant environment folders for every project, EnvKnit uses a **Rust CLI** backed by **[uv](https://docs.astral.sh/uv/)** to resolve dependencies and stores all packages in a **single global store**.
+EnvKnit solves a problem that `venv`, `uv`, and `pip` cannot: loading **multiple versions of the same package simultaneously** inside a single Python process. Instead of spinning up a subprocess or maintaining separate virtual environments, you declare which version you need at the call site and EnvKnit routes imports accordingly.
 
-With one `envknit.yaml`, you can cleanly define and switch between multiple, isolated environments (e.g., `default`, `ml`, `frontend`) without the overhead of heavy virtual environments.
+```python
+import envknit
+
+with envknit.use("requests", "2.28.2"):
+    import requests
+    legacy_response = requests.get(url)  # uses 2.28.2
+
+with envknit.use("requests", "2.31.0"):
+    import requests
+    new_response = requests.get(url)    # uses 2.31.0
+```
+
+> ⚠️ **Experimental:** EnvKnit intentionally bypasses Python's "one module per process" singleton rule. This breaks `isinstance` checks across version boundaries and is unsuitable for production use without understanding the constraints. See [caveats](#caveats).
 
 ---
 
-## ✨ Key Features
+## ✨ What EnvKnit Does
 
-- **Multi-Environment Management**: Define multiple environments in a single project. Switch seamlessly between a `default` backend env and an `ml` env with different dependencies.
-- **Global Package Store**: Packages are installed exactly once in `~/.envknit/packages/` and shared across all projects. Say goodbye to gigabytes of duplicated `.venv` folders.
-- **Unified Toolchain**: Natively respects `python_version` and `node_version` configurations via integrations with tools like `mise`, `fnm`, and `pyenv`.
-- **uv-Powered**: `envknit lock` and `envknit install` both delegate to [`uv`](https://docs.astral.sh/uv/) — required as of v0.2.0. The resolver version is recorded in `envknit.lock.yaml`.
-- **Rust-Powered CLI**: Fast, deterministic lock file generation distributed as a single self-contained binary via GitHub Releases.
-- **Transparent Execution**: Run tools with `envknit run -- <command>` to automatically inject the correct environment paths into `PYTHONPATH` or `PATH`.
+### The core problem
+
+Tools like `uv` and `venv` manage *environments* — each environment gets one version of a package. If script A needs `numpy==1.26` and script B needs `numpy==2.0`, you maintain two separate environments and run them as separate processes.
+
+EnvKnit takes a different approach: **install all versions to a global store, route imports at runtime**.
+
+### What this enables
+
+- **Multiple conflicting versions in one process** — load `numpy==1.26` and `numpy==2.0` in the same Python session, controlled by `ContextVar`-scoped import routing.
+- **No virtual environment overhead** — packages live in `~/.envknit/packages/`, shared across all projects. No gigabytes of duplicated `.venv` folders.
+- **Version-pinned environments in one config** — define multiple environments with conflicting dependencies in a single `envknit.yaml`, impossible with `uv dependency-groups`.
+- **Hard isolation via sub-interpreters** — Python 3.12+: spawn a true C-API sub-interpreter (PEP 684) with its own `sys.modules` for packages that can't share global state.
+
+### What this is NOT
+
+EnvKnit is not a replacement for `uv` as a general-purpose package manager. If you need:
+- Standard virtual environments → use `uv venv`
+- Fast dependency resolution → use `uv pip compile`
+- Simple per-project isolation → use `uv` or `pip`
+
+EnvKnit's CLI (`lock`, `install`, `run`) is a thin wrapper that prepares packages for the Python library. **The Python library is the product.**
 
 ---
 
 ## 🚀 Quick Start
 
-### 1. Define Environments
-Create an `envknit.yaml` to define your project's environments.
+### 1. Install
 
 ```bash
-envknit init
+# CLI binary (Linux)
+curl -L https://github.com/wgsim/EnvKnit/releases/latest/download/envknit-linux-amd64 -o envknit
+chmod +x envknit && sudo mv envknit /usr/local/bin/
 
-# Add to the default environment
-envknit add "fastapi>=0.100"
-
-# Add to a specialized 'ml' environment
-envknit add "torch>=2.0" --env ml
-envknit add "numpy>=1.24,<2.0" --env ml
+# Python library
+pip install envknit  # Requires Python 3.10+
 ```
 
-### 2. Lock and Install
-Resolve dependencies and install them to the global store (both powered by uv).
+### 2. Declare and install versions
 
 ```bash
+# Initialize project config
+envknit init
+
+# Add package versions to environments
+envknit add "requests==2.28.2"
+envknit add "requests==2.31.0" --env new
+
+# Resolve and install all versions to global store
 envknit lock
 envknit install
 ```
 
-### 3. Run Your Code
-Execute your scripts in the context of a specific environment.
+### 3. Use conflicting versions in-process
+
+```python
+import envknit
+
+# Route imports to specific installed versions
+with envknit.use("requests", "2.28.2"):
+    import requests
+    print(requests.__version__)  # 2.28.2
+
+with envknit.use("requests", "2.31.0"):
+    import requests
+    print(requests.__version__)  # 2.31.0
+```
+
+### 4. Run scripts with environment injection
 
 ```bash
-# Runs with 'default' environment packages injected into PYTHONPATH
+# Inject environment packages into PYTHONPATH
 envknit run -- python app.py
-
-# Runs tests skipping dev dependencies
-envknit run --no-dev -- python -m pytest
-
-# Runs a training script using the isolated 'ml' environment
 envknit run --env ml -- python train.py
+envknit run --no-dev -- python -m pytest
 ```
 
 ---
 
-## ⚠️ Advanced Feature: In-Process Isolation (Experimental)
-
-> **EXPERIMENTAL:** EnvKnit intentionally bypasses Python's "one module per process" singleton rule. While powerful for API migrations, it breaks traditional type checking (`isinstance`) across versions. **Use with caution.**
-
-Beyond standard environment management, EnvKnit provides three strategies for in-process isolation. **Most users need only `envknit run`** (no Python API required). The strategies below are for cases where subprocess-per-environment is insufficient:
+## 🔬 Isolation Strategies
 
 ### Gen 1 — Soft Isolation (`use()`)
 
-Dynamically routes imports via `ContextVars`. Fast, but shares global interpreter state.
+Routes imports via `ContextVar`. Fast, zero subprocess overhead. Shares global interpreter state — suitable for pure-Python packages.
 
 ```python
 import envknit
@@ -83,14 +120,31 @@ with envknit.use("requests", "2.28.2"):
     print(requests.__version__)  # 2.28.2
 ```
 
-*(For C-extension packages like `numpy`, use `envknit.worker()` to isolate them in subprocesses.)*
+> For C-extension packages (`numpy`, `torch`, etc.), use `envknit.worker()` to isolate in a subprocess.
+
+### Thread Context Propagation (`ContextThread`, `ContextExecutor`)
+
+`threading.Thread` does not inherit `ContextVar` state by default. EnvKnit provides opt-in wrappers that propagate the active version context:
+
+```python
+from envknit import ContextThread, ContextExecutor
+
+with envknit.use("requests", "2.28.2"):
+    # Snapshots context at __init__ time
+    t = ContextThread(target=worker_fn)
+    t.start()
+
+    # Snapshots context at submit() time
+    with ContextExecutor(max_workers=4) as pool:
+        future = pool.submit(worker_fn)
+```
 
 ### Gen 2 — Hard Isolation (`SubInterpreterEnv`, Python 3.12+)
 
 Spawns a true C-API sub-interpreter (PEP 684) with its own independent `sys.modules`, `sys.path`, and GIL. Host site-packages are never visible inside the sub-interpreter.
 
 ```python
-from envknit.isolation import SubInterpreterEnv
+from envknit import SubInterpreterEnv
 
 with SubInterpreterEnv("ml") as interp:
     interp.configure_from_lock("envknit.lock.yaml", env_name="ml")
@@ -101,57 +155,41 @@ result = {"version": some_ml_lib.__version__, "status": "ok"}
 print(result)  # {"version": "...", "status": "ok"}
 ```
 
-See the [Gen 2 Hard Isolation Guide](docs/guide/gen2-isolation.md) for full details on DTO patterns, C-extension fallback, and serialization constraints.
-
-### Thread Context Propagation (`ContextThread`, `ContextExecutor`)
-
-By default, `threading.Thread` does not inherit `ContextVar` state. Use opt-in wrappers to propagate the active version context to background threads:
-
-```python
-from envknit.isolation import ContextThread, ContextExecutor
-
-with envknit.use("requests", "2.28.2"):
-    # ContextThread snapshots context at __init__ time
-    t = ContextThread(target=worker_fn)
-    t.start()
-
-    # ContextExecutor snapshots context at submit() time
-    with ContextExecutor(max_workers=4) as pool:
-        future = pool.submit(worker_fn)
-```
+See the [Gen 2 Hard Isolation Guide](docs/guide/gen2-isolation.md) for DTO patterns, C-extension fallback, and serialization constraints.
 
 ---
 
-## 📦 Installation
+## ⚠️ Caveats
 
-EnvKnit consists of two components: the **Rust CLI** (for management) and the **Python library** (for runtime hooks). You need both.
+EnvKnit intentionally breaks Python's "one module per process" assumption:
 
-### Step 1: Install the CLI Binary
-Required for `envknit init`, `lock`, `install`, and `run`.
+- **`isinstance` checks fail across version boundaries** — `obj` from `requests==2.28.2` is not an instance of `requests.Response` from `2.31.0`.
+- **C-extension singletons are not isolated** — packages like `numpy` share C-level state; use `envknit.worker()` for subprocess isolation.
+- **Sub-interpreters require Python 3.12+** — `SubInterpreterEnv` is unavailable on earlier versions.
+- **Not for production use without full understanding of these constraints.**
 
-```bash
-# Linux
-curl -L https://github.com/wgsim/EnvKnit/releases/latest/download/envknit-linux-amd64 -o envknit
-chmod +x envknit && sudo mv envknit /usr/local/bin/
+---
 
-# macOS (Apple Silicon)
-curl -L https://github.com/wgsim/EnvKnit/releases/latest/download/envknit-macos-arm64 -o envknit
-chmod +x envknit && sudo mv envknit /usr/local/bin/
-```
-*(For Windows and other platforms, see the [Releases page](https://github.com/wgsim/EnvKnit/releases).)*
+## 📦 CLI Reference
 
-### Step 2: Install the Python Library
-Required for the `envknit.use()` and `envknit.worker()` APIs.
+The CLI prepares packages for the Python library.
 
 ```bash
-pip install envknit  # Requires Python 3.10+
+envknit init          # Create envknit.yaml
+envknit add <pkg>     # Add a package requirement
+envknit lock          # Resolve and write envknit.lock.yaml (via uv)
+envknit install       # Install locked packages to global store (via uv)
+envknit run -- <cmd>  # Run command with environment injected into PYTHONPATH
+envknit verify        # Verify installed packages match lock file hashes
+envknit doctor        # Check installation health
+envknit store         # Inspect global package store
 ```
+
+Requires [uv](https://docs.astral.sh/uv/) (v0.2.0+).
 
 ---
 
 ## 📚 Documentation
-
-Dive deeper into how EnvKnit works and how to integrate it into your workflow.
 
 ### Guides
 
@@ -181,7 +219,7 @@ Dive deeper into how EnvKnit works and how to integrate it into your workflow.
 
 ## 🤝 Contributing
 
-We welcome contributions! EnvKnit is built with Rust and Python.
+EnvKnit is built with Rust and Python.
 
 ```bash
 git clone https://github.com/wgsim/EnvKnit.git
@@ -191,7 +229,7 @@ cd EnvKnit
 cargo test
 
 # Test the Python runtime library
-pip install -e ".[dev]" 
+pip install -e ".[dev]"
 python -m pytest
 ```
 
