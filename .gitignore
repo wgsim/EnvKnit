@@ -99,3 +99,8 @@ dmypy.json
 /target/
 \nconductor/
 .worktrees/
+
+# Claude Code session artifacts
+CONTINUATION.md
+*_REVIEW.md
+docs/superpowers/
