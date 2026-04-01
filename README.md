@@ -108,23 +108,55 @@ envknit run --no-dev -- python -m pytest
 
 ## 🔬 Isolation Strategies
 
+### Which strategy to use?
+
+| Your situation | Recommended API | Notes |
+|---|---|---|
+| Pure-Python package, multi-version in one process | `use()` | Fastest, zero overhead |
+| C-extension package (`numpy`, `torch`, `pandas`) | `use(auto_worker=True)` or `worker()` | Subprocess IPC via proxy |
+| Need strict global state isolation (Python 3.12+) | `SubInterpreterEnv` | Hard isolation, C-ext requires `worker()` fallback |
+| Threading with versioned imports | `ContextThread` / `ContextExecutor` | Propagate ContextVar to threads |
+
+---
+
 ### Gen 1 — Soft Isolation (`use()`)
 
-Routes imports via `ContextVar`. Fast, zero subprocess overhead. Shares global interpreter state — suitable for pure-Python packages.
+Routes imports via `ContextVar`. Zero subprocess overhead. Works for pure-Python packages.
 
 ```python
 import envknit
+envknit.enable()
 
 with envknit.use("requests", "2.28.2"):
     import requests
     print(requests.__version__)  # 2.28.2
 ```
 
-> For C-extension packages (`numpy`, `torch`, etc.), use `envknit.worker()` to isolate in a subprocess.
+**C-extension packages** (`numpy`, `torch`, `pandas`) share C-level global state and cannot be loaded as two versions simultaneously. Use `auto_worker=True` to fall back transparently to a subprocess:
+
+```python
+# auto_worker=True: tries in-process first, falls back to worker() for C-ext
+with envknit.use("numpy", "1.26.4", auto_worker=True) as np:
+    print(np.__version__)  # 1.26.4 — via subprocess proxy if C-ext
+
+with envknit.use("numpy", "2.0.0", auto_worker=True) as np:
+    print(np.__version__)  # 2.0.0 — separate worker process
+```
+
+> **`isinstance` caveat**: objects returned across version boundaries are not the same type. Use primitive types (`dict`, `list`, `str`, `int`) or DTOs to pass data between versions. Avoid passing version-specific objects directly.
+
+### Subprocess Isolation (`worker()`)
+
+Direct subprocess worker pool. Use when you always want subprocess isolation regardless of package type.
+
+```python
+with envknit.worker("numpy", "1.26.4") as np:
+    arr = np.array([1, 2, 3]).tolist()  # serialize primitives back to host
+```
 
 ### Thread Context Propagation (`ContextThread`, `ContextExecutor`)
 
-`threading.Thread` does not inherit `ContextVar` state by default. EnvKnit provides opt-in wrappers that propagate the active version context:
+`threading.Thread` does not inherit `ContextVar` state by default. EnvKnit provides opt-in wrappers:
 
 ```python
 from envknit import ContextThread, ContextExecutor
@@ -141,21 +173,31 @@ with envknit.use("requests", "2.28.2"):
 
 ### Gen 2 — Hard Isolation (`SubInterpreterEnv`, Python 3.12+)
 
-Spawns a true C-API sub-interpreter (PEP 684) with its own independent `sys.modules`, `sys.path`, and GIL. Host site-packages are never visible inside the sub-interpreter.
+Spawns a true C-API sub-interpreter (PEP 684) with its own independent `sys.modules`, `sys.path`, and GIL. Host site-packages are **never visible** inside the sub-interpreter.
 
 ```python
-from envknit import SubInterpreterEnv
+from envknit import SubInterpreterEnv, CExtIncompatibleError
 
 with SubInterpreterEnv("ml") as interp:
     interp.configure_from_lock("envknit.lock.yaml", env_name="ml")
+
+    # Pure-Python packages work directly
     result = interp.eval_json("""
-import some_ml_lib
-result = {"version": some_ml_lib.__version__, "status": "ok"}
+import some_lib
+result = {"version": some_lib.__version__}
 """)
-print(result)  # {"version": "...", "status": "ok"}
+
+    # C-extension packages need explicit fallback to worker()
+    try:
+        interp.try_import("numpy", raise_on_cext=True)
+        result = interp.eval_json("import numpy; result = numpy.__version__")
+    except CExtIncompatibleError:
+        import envknit
+        with envknit.worker("numpy", "1.26.4") as np:
+            result = np.__version__
 ```
 
-See the [Gen 2 Hard Isolation Guide](docs/guide/gen2-isolation.md) for DTO patterns, C-extension fallback, and serialization constraints.
+See the [Gen 2 Hard Isolation Guide](docs/guide/gen2-isolation.md) for DTO patterns and serialization constraints.
 
 ---
 
@@ -163,10 +205,26 @@ See the [Gen 2 Hard Isolation Guide](docs/guide/gen2-isolation.md) for DTO patte
 
 EnvKnit intentionally breaks Python's "one module per process" assumption:
 
-- **`isinstance` checks fail across version boundaries** — `obj` from `requests==2.28.2` is not an instance of `requests.Response` from `2.31.0`.
-- **C-extension singletons are not isolated** — packages like `numpy` share C-level state; use `envknit.worker()` for subprocess isolation.
-- **Sub-interpreters require Python 3.12+** — `SubInterpreterEnv` is unavailable on earlier versions.
+- **`isinstance` checks fail across version boundaries** — `obj` from `requests==2.28.2` is not an instance of `requests.Response` from `2.31.0`. Workaround: exchange only primitives (`dict`, `list`, `int`, `str`) or version-neutral DTOs between version contexts.
+- **C-extension singletons are not isolated** — packages like `numpy`, `pandas`, `torch` share C-level global state. Use `use(auto_worker=True)` or `worker()` for subprocess isolation.
+- **Sub-interpreters require Python 3.12+ CPython** — `SubInterpreterEnv` raises `UnsupportedPlatformError` on 3.10/3.11 or non-CPython runtimes.
+- **C-extensions cannot load inside `SubInterpreterEnv`** — use `try_import(raise_on_cext=True)` + `except CExtIncompatibleError` to detect and fall back to `worker()`.
 - **Not for production use without full understanding of these constraints.**
+
+---
+
+## 🐍 Python Version Compatibility
+
+| Feature | Python 3.10 | Python 3.11 | Python 3.12 | Python 3.13+ |
+|---|---|---|---|---|
+| `envknit.use()` (pure Python) | ✅ | ✅ | ✅ | ✅ |
+| `envknit.use(auto_worker=True)` | ✅ | ✅ | ✅ | ✅ |
+| `envknit.worker()` (subprocess) | ✅ | ✅ | ✅ | ✅ |
+| `ContextThread` / `ContextExecutor` | ✅ | ✅ | ✅ | ✅ |
+| `SubInterpreterEnv` (hard isolation) | ❌ | ❌ | ✅ CPython only | ✅ CPython only |
+| C-ext inside `SubInterpreterEnv` | ❌ | ❌ | ❌ use `worker()` | ❌ use `worker()` |
+
+> `SubInterpreterEnv` requires CPython — it will not work on PyPy, GraalPy, or CPython builds with `--disable-gil`/`--without-threads`.
 
 ---
 

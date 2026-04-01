@@ -200,22 +200,38 @@ class SubInterpreterEnv:
         new_path = lockfile_paths + stdlib_paths
         self.run_string(f"import sys; sys.path = {new_path!r}")
 
-    def try_import(self, module_name: str) -> bool:
+    def try_import(self, module_name: str, *, raise_on_cext: bool = False) -> bool:
         """
         Probe whether *module_name* can be imported in this sub-interpreter.
 
         The module name is passed as **data** (via a temporary JSON file) and
         never interpolated into Python code, preventing code injection.
 
+        Args:
+            module_name: The module to probe.
+            raise_on_cext: If True, raise :exc:`CExtIncompatibleError` instead
+                of returning False when a C-extension is incompatible with
+                sub-interpreters.  Use this when you want to fall back to
+                :func:`envknit.worker` in an except clause::
+
+                    try:
+                        interp.try_import("numpy", raise_on_cext=True)
+                        result = interp.eval_json("import numpy; result = numpy.__version__")
+                    except CExtIncompatibleError:
+                        with envknit.worker("numpy", version) as np:
+                            result = np.__version__
+
         Returns:
             True  — module imported successfully.
-            False — module is a C-extension that does not support sub-interpreters
-                    (PEP 489 single-phase init).  Caller should fall back to a
-                    subprocess-based worker.
+            False — module is a C-extension incompatible with sub-interpreters
+                    (PEP 489 single-phase init); only when *raise_on_cext* is False.
+                    Caller should fall back to :func:`envknit.worker`.
 
         Raises:
-            ImportError — module is simply not found (ModuleNotFoundError) or
-                          fails for a reason unrelated to sub-interpreter support.
+            CExtIncompatibleError — C-extension incompatible; only when
+                *raise_on_cext* is True.
+            ImportError — module is simply not found, or fails for a reason
+                unrelated to sub-interpreter support.
         """
         self._require_active()
 
@@ -259,19 +275,24 @@ class SubInterpreterEnv:
                 raise ImportError(f"No module named {module_name!r}")
             if status == "error":
                 msg = result.get("msg", "")
-                if any(pat in msg for pat in _CEXT_INCOMPATIBLE_MESSAGES):
-                    return False
-                # Fallback: future Python versions may change exact wording but will
-                # almost certainly still reference "subinterpreter" with a
-                # compatibility-related qualifier.
-                msg_lower = msg.lower()
-                if "subinterpreter" in msg_lower and any(
-                    kw in msg_lower for kw in ("support", "cannot", "not compatible")
-                ):
-                    logger.info(
-                        "try_import(%r): C-ext fallback pattern matched: %s",
-                        module_name, msg,
-                    )
+                is_cext = any(pat in msg for pat in _CEXT_INCOMPATIBLE_MESSAGES)
+                if not is_cext:
+                    msg_lower = msg.lower()
+                    if "subinterpreter" in msg_lower and any(
+                        kw in msg_lower for kw in ("support", "cannot", "not compatible")
+                    ):
+                        logger.info(
+                            "try_import(%r): C-ext fallback pattern matched: %s",
+                            module_name, msg,
+                        )
+                        is_cext = True
+                if is_cext:
+                    if raise_on_cext:
+                        raise CExtIncompatibleError(
+                            f"{module_name!r} is a C-extension that does not support "
+                            "sub-interpreters (PEP 489 single-phase init). "
+                            "Use envknit.worker() for subprocess-based isolation instead."
+                        )
                     return False
                 raise ImportError(
                     f"Failed to import {module_name!r} in sub-interpreter: {msg}"

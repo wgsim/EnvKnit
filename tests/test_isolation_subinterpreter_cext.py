@@ -105,6 +105,30 @@ def test_try_import_subinterpreter_in_msg_but_no_compat_keyword():
             interp.try_import("fake_ambiguous_module")
 
 
+def test_try_import_raise_on_cext_raises_cext_incompatible_error():
+    """raise_on_cext=True 시 C-ext에서 CExtIncompatibleError 발생."""
+    with SubInterpreterEnv("test") as interp:
+        _register_fake_cext(
+            interp,
+            "fake_cext_raise",
+            "module fake_cext_raise does not support loading in subinterpreters",
+        )
+        with pytest.raises(CExtIncompatibleError, match="envknit.worker"):
+            interp.try_import("fake_cext_raise", raise_on_cext=True)
+
+
+def test_try_import_raise_on_cext_false_returns_false():
+    """raise_on_cext=False(기본값) 시 C-ext에서 False 반환 (기존 동작 유지)."""
+    with SubInterpreterEnv("test") as interp:
+        _register_fake_cext(
+            interp,
+            "fake_cext_default",
+            "module fake_cext_default does not support loading in subinterpreters",
+        )
+        result = interp.try_import("fake_cext_default", raise_on_cext=False)
+    assert result is False
+
+
 def test_try_import_module_name_is_not_executed_as_code():
     """
     module_name이 Python 코드로 실행되지 않음을 확인 — 코드 인젝션 방어 검증.
