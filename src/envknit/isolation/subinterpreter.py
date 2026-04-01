@@ -10,11 +10,14 @@ Requires Python 3.12+ with the _interpreters internal module.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sysconfig
 import tempfile
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 try:
     import _interpreters
@@ -41,6 +44,21 @@ _CEXT_INCOMPATIBLE_MESSAGES = frozenset([
     "cannot be imported in a subinterpreter",        # 일부 built-in 모듈 (3.12+)
     "module does not support running in subinterpreters",  # _interpreters 채널 경로 (3.13)
 ])
+
+
+def _run_in_subinterpreter(interp_id: int, code: str) -> None:
+    """
+    Execute *code* in the sub-interpreter identified by *interp_id*.
+
+    Raises RuntimeError if execution fails inside the sub-interpreter.
+    This is the single call-site for ``_interpreters.run_string``; when a
+    public ``interpreters`` module becomes available, only this function
+    needs to change.
+    """
+    err = _interpreters.run_string(interp_id, code)
+    if err is not None:
+        detail = getattr(err, "formatted", None) or getattr(err, "msg", str(err))
+        raise RuntimeError(f"Sub-interpreter execution failed: {detail}")
 
 
 def _get_stdlib_paths() -> list[str]:
@@ -73,9 +91,13 @@ class SubInterpreterEnv:
 
     def __init__(self, env_name: str) -> None:
         if not _SUPPORTS_SUBINTERPRETERS:
+            import sys as _sys
             raise UnsupportedPlatformError(
-                "Sub-interpreters require Python 3.12+ with _interpreters module. "
-                f"Current Python: {'.'.join(str(v) for v in __import__('sys').version_info[:3])}"
+                f"Sub-interpreters require CPython 3.12+ with the _interpreters "
+                f"C-API module (current: {'.'.join(str(v) for v in _sys.version_info[:3])} "
+                f"{_sys.implementation.name}). "
+                "Possible causes: non-CPython interpreter (PyPy, GraalPy), or "
+                "CPython built with --disable-gil / --without-threads."
             )
         self.env_name = env_name
         self.interp_id: int | None = None
@@ -96,7 +118,7 @@ class SubInterpreterEnv:
     def run_string(self, code: str) -> None:
         """Execute a string of Python code in the sub-interpreter."""
         self._require_active()
-        _interpreters.run_string(self.interp_id, code)
+        _run_in_subinterpreter(self.interp_id, code)
 
     def eval_json(self, code: str) -> dict[str, Any]:
         """
@@ -121,14 +143,15 @@ class SubInterpreterEnv:
                 "if 'result' in dir():\n"
                 f"    open({repr(tmp)}, 'w').write(_json.dumps(result))\n"
             )
-            # run_string returns an error namespace on failure (does not raise).
-            err = _interpreters.run_string(self.interp_id, wrapper)
-            if err is not None:
-                raise RuntimeError(
-                    f"Sub-interpreter execution failed: {err.formatted}"
-                )
+            _run_in_subinterpreter(self.interp_id, wrapper)
             content = Path(tmp).read_text()
-            return json.loads(content) if content else {}
+            if not content:
+                logger.debug(
+                    "eval_json: sub-interpreter produced no 'result' variable; "
+                    "returning empty dict."
+                )
+                return {}
+            return json.loads(content)
         finally:
             try:
                 os.unlink(tmp)
@@ -225,11 +248,7 @@ class SubInterpreterEnv:
                 "    _r = {'status': 'error', 'msg': str(_e)}\n"
                 f"open({repr(output_path)}, 'w').write(_j.dumps(_r))\n"
             )
-            err = _interpreters.run_string(self.interp_id, probe_code)
-            if err is not None:
-                raise RuntimeError(
-                    f"Sub-interpreter probe failed: {err.formatted}"
-                )
+            _run_in_subinterpreter(self.interp_id, probe_code)
 
             result = json.loads(Path(output_path).read_text())
             status = result.get("status")
@@ -241,6 +260,18 @@ class SubInterpreterEnv:
             if status == "error":
                 msg = result.get("msg", "")
                 if any(pat in msg for pat in _CEXT_INCOMPATIBLE_MESSAGES):
+                    return False
+                # Fallback: future Python versions may change exact wording but will
+                # almost certainly still reference "subinterpreter" with a
+                # compatibility-related qualifier.
+                msg_lower = msg.lower()
+                if "subinterpreter" in msg_lower and any(
+                    kw in msg_lower for kw in ("support", "cannot", "not compatible")
+                ):
+                    logger.info(
+                        "try_import(%r): C-ext fallback pattern matched: %s",
+                        module_name, msg,
+                    )
                     return False
                 raise ImportError(
                     f"Failed to import {module_name!r} in sub-interpreter: {msg}"

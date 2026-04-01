@@ -152,3 +152,17 @@ def test_configure_from_lock_unknown_env_raises(tmp_path):
     with SubInterpreterEnv("test") as interp:
         with pytest.raises(ValueError, match="not found in lock file"):
             interp.configure_from_lock(str(lock_file), env_name="nonexistent")
+
+
+def test_run_string_raises_on_subinterpreter_exception():
+    """run_string: sub-interpreter 내부 예외가 RuntimeError로 전파됨."""
+    with SubInterpreterEnv("test") as interp:
+        with pytest.raises(RuntimeError, match="Sub-interpreter execution failed"):
+            interp.run_string("raise ValueError('boom')")
+
+
+def test_run_string_success_returns_none():
+    """run_string: 정상 실행 시 None 반환 (예외 없음)."""
+    with SubInterpreterEnv("test") as interp:
+        result = interp.run_string("x = 1 + 1")
+    assert result is None

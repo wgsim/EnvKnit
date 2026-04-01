@@ -53,6 +53,58 @@ def test_try_import_missing_module_raises_importerror():
             interp.try_import("_completely_nonexistent_module_xyz_123")
 
 
+def _register_fake_cext(interp, module_name: str, error_message: str) -> None:
+    """서브인터프리터에 fake C-ext meta-path finder를 등록하는 헬퍼."""
+    interp.run_string(f'''
+import sys
+class _FakeLoader:
+    def find_spec(self, name, path, target=None):
+        if name == {module_name!r}:
+            import importlib.util
+            return importlib.util.spec_from_loader(name, self)
+    def create_module(self, spec):
+        raise ImportError({error_message!r})
+    def exec_module(self, m): pass
+sys.meta_path.insert(0, _FakeLoader())
+''')
+
+
+def test_try_import_cext_unknown_message_with_subinterpreter_keyword():
+    """미래 Python에서 새로운 형태의 C-ext 에러 메시지도 False 반환 (fallback 패턴)."""
+    with SubInterpreterEnv("test") as interp:
+        _register_fake_cext(
+            interp,
+            "fake_future_cext",
+            "module fake_future_cext is not compatible with subinterpreters",
+        )
+        result = interp.try_import("fake_future_cext")
+    assert result is False
+
+
+def test_try_import_generic_importerror_not_matched_by_fallback():
+    """'subinterpreter' 미포함 일반 ImportError는 False가 아닌 ImportError raise."""
+    with SubInterpreterEnv("test") as interp:
+        _register_fake_cext(
+            interp,
+            "fake_broken_module",
+            "missing shared library libfoo.so.1",
+        )
+        with pytest.raises(ImportError):
+            interp.try_import("fake_broken_module")
+
+
+def test_try_import_subinterpreter_in_msg_but_no_compat_keyword():
+    """'subinterpreter' 포함하되 호환성 키워드 없는 메시지는 ImportError raise (false-positive 방어)."""
+    with SubInterpreterEnv("test") as interp:
+        _register_fake_cext(
+            interp,
+            "fake_ambiguous_module",
+            "this module was loaded from a subinterpreter previously",
+        )
+        with pytest.raises(ImportError):
+            interp.try_import("fake_ambiguous_module")
+
+
 def test_try_import_module_name_is_not_executed_as_code():
     """
     module_name이 Python 코드로 실행되지 않음을 확인 — 코드 인젝션 방어 검증.
