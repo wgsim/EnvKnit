@@ -65,10 +65,25 @@ All notable changes to EnvKnit are documented here.
 
 ---
 
+## [0.2.0] — 2026-03-26
+
+### Breaking Changes
+- **uv is now a required dependency** for `envknit lock` and `envknit install`. The built-in resolver (`resolver.rs`) and `pip install --target` fallback have been removed. If `uv` is not on PATH, `envknit lock` and `envknit install` will fail with a clear error. Install uv: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+
+### Added
+- **`envknit doctor` uv check**: fails with actionable message if uv is absent; warns if below minimum supported version (0.10.7).
+- **`SubInterpreterEnv` exported at top-level**: `from envknit import SubInterpreterEnv` now works without importing from `envknit.isolation.subinterpreter`.
+- **ContextVar propagation helpers exported at top-level**: `copy_context_to_thread` and related utilities accessible from `envknit` directly.
+
+### Changed
+- `envknit install` now uses `uv pip install --target` instead of `pip install --target`. This improves install speed and reliability for packages with complex dependency graphs.
+
+---
+
 ## [0.1.2] — 2026-03-24
 
 ### Added
-- **uv resolver delegation** (`uv_resolver.rs`): `envknit lock` now delegates to `uv pip compile` when `uv` is on PATH, falling back to the built-in resolver otherwise. Resolver used is recorded in `lock.resolver_version` (e.g. `uv/0.10.7`).
+- **uv resolver delegation** (`uv_resolver.rs`): `envknit lock` delegates to `uv pip compile` when `uv` is on PATH, falling back to the built-in PubGrub resolver otherwise *(note: uv became required and the built-in resolver was removed in v0.2.0)*. Resolver used is recorded in `lock.resolver_version` (e.g. `uv/0.10.7`).
 - **Extras support in lock specs**: `name[extra]>=version` (PEP 508) correctly passed to uv resolver.
 - **Security: newline injection guard**: package spec strings are rejected if they contain `\n` or `\r` characters to prevent uv flag injection via crafted package names.
 - **`lock_generated_at` timestamp** in lock file for audit trails.

@@ -26,21 +26,47 @@ Read the full [CLI Scripts Guide](cli-scripts.md) for more details.
 ## 2. Python API and Import Issues
 
 ### `CExtensionError` when using `envknit.use()`
-**Symptom:** You get an `envknit.isolation.import_hook.CExtensionError: ImportError` when trying to use `with envknit.use("numpy", ...):`.
+**Symptom:** `envknit.isolation.import_hook.CExtensionError: ImportError` when using `with envknit.use("numpy", ...):`.
 
-**Cause:** The `envknit.use()` context manager dynamically routes imports within the same Python process. However, CPython does not support loading multiple versions of the same C extension (like `numpy` or `pandas`) in the same process.
+**Cause:** CPython cannot load multiple versions of the same C-extension (`numpy`, `pandas`, `torch`, etc.) in the same process. This is a permanent CPython limitation, not a bug.
 
-**Solution:** Use the `envknit.worker()` API instead, which runs the C-extension package in an isolated subprocess.
+**Solution A — `auto_worker=True` (recommended):** Pass `auto_worker=True` to let EnvKnit fall back to a subprocess worker automatically:
 ```python
-# Change this:
-with envknit.use("numpy", "1.24.0"):
-    import numpy as np
-
-# To this:
-with envknit.worker("numpy", "1.24.0") as np:
-    arr = np.zeros(100)
+# Works for both pure-Python and C-extension packages
+with envknit.use("numpy", "1.26.4", auto_worker=True) as np:
+    arr = np.zeros(100).tolist()
 ```
-Read more in the [Python API Guide](python-api.md).
+
+**Solution B — explicit `worker()`:** Use `worker()` directly when you want explicit subprocess control:
+```python
+with envknit.worker("numpy", "1.26.4") as np:
+    arr = np.zeros(100).tolist()
+```
+
+### `CExtIncompatibleError` in `SubInterpreterEnv.try_import()`
+**Symptom:** `envknit.CExtIncompatibleError` raised when calling `interp.try_import("numpy", raise_on_cext=True)`.
+
+**Cause:** Same fundamental CPython limitation — C-extensions with single-phase init (PEP 489) cannot be loaded in sub-interpreters. This is permanent until the package migrates to multi-phase init.
+
+**Solution:** Catch `CExtIncompatibleError` and fall back to `worker()`:
+```python
+from envknit import SubInterpreterEnv, CExtIncompatibleError
+
+with SubInterpreterEnv("ml") as interp:
+    try:
+        interp.try_import("numpy", raise_on_cext=True)
+        result = interp.eval_json("import numpy; result = numpy.__version__")
+    except CExtIncompatibleError:
+        with envknit.worker("numpy", "1.26.4") as np:
+            result = np.__version__
+```
+
+### `UnsupportedPlatformError` for `SubInterpreterEnv`
+**Symptom:** `envknit.UnsupportedPlatformError` when instantiating `SubInterpreterEnv`.
+
+**Cause:** `SubInterpreterEnv` requires CPython 3.12+. It is unavailable on Python 3.10/3.11, PyPy, GraalPy, or CPython builds with `--disable-gil`/`--without-threads`.
+
+**Solution:** Check your Python version. If on 3.10/3.11, use `use(auto_worker=True)` or `worker()` instead — they work on Python 3.10+.
 
 ### `ModuleNotFoundError: No module named 'X'`
 **Symptom:** Your Python script raises a `ModuleNotFoundError` even though the package is listed in `envknit.yaml`.
@@ -73,6 +99,21 @@ envknit run -- python app.py
 ```bash
 pip install --upgrade envknit
 ```
+
+### `envknit lock` fails with "uv not found"
+**Symptom:** `envknit lock` fails with an error about `uv` not being installed or not on PATH.
+
+**Cause:** Since v0.2.0, `uv` is a required dependency for both `envknit lock` and `envknit install`. It is no longer optional.
+
+**Solution:** Install uv:
+```bash
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Or via pip
+pip install uv
+```
+Then verify: `uv --version`
 
 ### Dependency Resolution Fails (`envknit lock`)
 **Symptom:** The lock command fails with a SAT solver or version conflict error.

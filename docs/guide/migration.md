@@ -73,11 +73,80 @@ If you are using Python's built-in `venv`, you no longer need the local `.venv/`
 
 ## What changes in your workflow?
 
-| Action | Traditional (`venv`) | EnvKnit |
-|--------|----------------------|---------|
-| **Activating** | `source .venv/bin/activate` | **None!** Just use `envknit run` |
-| **Running tests** | `pytest` | `envknit run -- python -m pytest` |
-| **Installing** | `pip install requests` | `envknit add requests && envknit install` |
-| **Storage** | Duplicated per project (`.venv/`) | Global store (`~/.envknit/packages/`) |
+| Action | Traditional (`venv`) | EnvKnit (CLI) | EnvKnit (Python API) |
+|--------|----------------------|---------------|----------------------|
+| **Activating** | `source .venv/bin/activate` | None — use `envknit run` | `envknit.configure_from_lock()` |
+| **Running tests** | `pytest` | `envknit run -- python -m pytest` | — |
+| **Installing** | `pip install requests` | `envknit add requests && envknit install` | — |
+| **Storage** | Duplicated per project (`.venv/`) | Global store (`~/.envknit/packages/`) | Global store |
+| **Multi-version** | Not possible | Not possible | `envknit.use("pkg", "ver")` |
 
-Next, read about [How EnvKnit Works](concepts.md) to understand the global store architecture.
+---
+
+## Using the Python API in Application Code
+
+> **This is EnvKnit's core feature.** The CLI (`lock`/`install`/`run`) prepares packages; the Python library uses them at runtime for multi-version isolation.
+
+### Basic: load a single version
+
+After migrating your dependencies to `envknit.yaml` and running `envknit lock && envknit install`, update your application code to activate EnvKnit's import hook:
+
+```python
+import envknit
+
+# Load all locked packages and install the import hook
+envknit.configure_from_lock("envknit.lock.yaml")
+
+# Imports now resolve to locked versions automatically
+import requests   # gets the version declared in envknit.lock.yaml
+```
+
+### Advanced: multi-version in one process
+
+The unique capability that venv/uv cannot replicate:
+
+```python
+import envknit
+
+envknit.configure_from_lock("envknit.lock.yaml")
+
+# Pure-Python packages: direct in-process routing
+with envknit.use("requests", "2.28.2"):
+    import requests
+    legacy = requests.get(url)
+
+with envknit.use("requests", "2.31.0"):
+    import requests
+    modern = requests.get(url)
+```
+
+### C-extension packages (numpy, pandas, torch)
+
+```python
+# auto_worker=True handles both pure-Python and C-ext transparently
+with envknit.use("numpy", "1.26.4", auto_worker=True) as np_old:
+    v1 = np_old.zeros(10).tolist()
+
+with envknit.use("numpy", "2.0.0", auto_worker=True) as np_new:
+    v2 = np_new.zeros(10).tolist()
+```
+
+### Replacing `envknit run` with in-code activation
+
+If you previously relied on `envknit run -- python app.py` to inject `PYTHONPATH`, you can replace it with in-code activation for more control:
+
+```python
+# app.py — no longer needs `envknit run` wrapper
+import envknit
+envknit.configure_from_lock("envknit.lock.yaml", env="default")
+
+# rest of your application
+import fastapi
+...
+```
+
+This is the preferred pattern for libraries and long-running services — the application owns its own activation, rather than depending on the shell wrapper.
+
+---
+
+Next, read the [Python API Guide](python-api.md) for full API reference, or [How EnvKnit Works](concepts.md) to understand the architecture.
