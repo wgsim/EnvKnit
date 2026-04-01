@@ -130,17 +130,44 @@ async def main():
 
 Thread safety follows the same pattern via `ContextVar` thread-local semantics.
 
-### When NOT to Use `use()`
+### C-Extension Packages: `auto_worker=True`
 
-Do not use `use()` for packages that contain C extensions. The import hook raises
-`CExtensionError` if the package has any `.so` / `.pyd` files under its install path:
+> ⛔ **PERMANENT LIMITATION**: `use()` cannot load C-extension packages (numpy, pandas, torch, etc.) in-process. This is not a bug — it is a fundamental CPython constraint (OS `dlopen` does not support unloading).
+
+When `use()` is called for a package with C-extension files (`.so` / `.pyd`), it raises `CExtensionError` by default.
+
+**Recommended pattern**: pass `auto_worker=True` to fall back transparently to a subprocess worker:
 
 ```python
-with envknit.use("numpy", "1.26.4"):   # raises CExtensionError
-    import numpy
+# Without auto_worker — raises CExtensionError for C-ext packages
+with envknit.use("numpy", "1.26.4"):
+    import numpy  # CExtensionError!
+
+# With auto_worker=True — works for both pure-Python and C-ext packages
+with envknit.use("numpy", "1.26.4", auto_worker=True) as np:
+    result = np.zeros(100).tolist()   # subprocess IPC for C-ext
 ```
 
-Use `envknit.worker()` instead for C extension packages. See below.
+When `auto_worker=True` is active and a C-extension is detected, `use()` returns a
+`WorkerContext` (subprocess proxy) instead of a `VersionContext`. The interface is the
+same — both are context managers — but attribute access on `WorkerContext` goes through
+IPC, not in-process calls.
+
+```python
+# This works identically for both pure-Python and C-ext packages
+with envknit.use("requests", "2.31.0", auto_worker=True) as mod:
+    # pure Python: mod IS the module (fast, in-process)
+    response = mod.get("https://example.com")
+
+with envknit.use("numpy", "1.26.4", auto_worker=True) as np:
+    # C-ext: np is a ModuleProxy (IPC to subprocess)
+    arr = np.zeros(100)
+```
+
+**When to use `worker()` directly instead of `auto_worker=True`**:
+- You always want subprocess isolation regardless of package type.
+- You need to control the IPC `timeout` parameter.
+- You want the code to be explicit about subprocess boundaries.
 
 ---
 
@@ -388,7 +415,7 @@ result = {"python": sys.version, "path_count": len(sys.path)}
 > **Security note**: `eval_json()` executes the `code` string as-is. Never interpolate
 > untrusted input into `code`. For probing untrusted module names, use `try_import()`.
 
-### `try_import(module_name)`
+### `try_import(module_name, *, raise_on_cext=False)`
 
 Probes whether a module can be loaded in the sub-interpreter. The module name is passed
 as JSON data — never interpolated into Python code — preventing code injection.
@@ -396,27 +423,47 @@ as JSON data — never interpolated into Python code — preventing code injecti
 | Return / Raise | Meaning |
 |---|---|
 | `True` | Module loaded successfully |
-| `False` | C-extension with PEP 489 single-phase init — use `worker()` fallback |
+| `False` | C-extension incompatible with sub-interpreters (only when `raise_on_cext=False`) |
+| `CExtIncompatibleError` | C-extension incompatible (only when `raise_on_cext=True`) |
 | `ImportError` | Module not found or unrelated import failure |
+
+**Pattern A — boolean check** (`raise_on_cext=False`, default):
 
 ```python
 with SubInterpreterEnv("ml") as interp:
     if interp.try_import("numpy"):
-        # numpy supports multi-phase init — safe to use in sub-interpreter
         result = interp.eval_json("import numpy; result = {'ok': True}")
     else:
-        # fallback to subprocess worker
+        # C-ext: fall back to worker()
         with envknit.worker("numpy", "1.26.4") as np:
             result = {"ok": np.zeros(1).tolist()}
 ```
+
+**Pattern B — exception-based** (`raise_on_cext=True`, cleaner for multiple packages):
+
+```python
+from envknit import SubInterpreterEnv, CExtIncompatibleError
+
+with SubInterpreterEnv("ml") as interp:
+    try:
+        interp.try_import("numpy", raise_on_cext=True)
+        result = interp.eval_json("import numpy; result = numpy.__version__")
+    except CExtIncompatibleError:
+        with envknit.worker("numpy", "1.26.4") as np:
+            result = np.__version__
+```
+
+> ⛔ **PERMANENT LIMITATION**: C-extensions (`numpy`, `pandas`, `torch`, etc.) will always
+> fail `try_import()` until each library migrates to PEP 489 multi-phase init (estimated 2027+).
+> Always provide a `worker()` fallback for C-extension packages in sub-interpreter code.
 
 ### Error Types
 
 | Exception | Raised when |
 |---|---|
-| `UnsupportedPlatformError` | Python < 3.12 or `_interpreters` unavailable |
-| `CExtIncompatibleError` | Defined for callers that prefer exceptions over `False` return |
-| `RuntimeError` | `eval_json()` / `run_string()` — sub-interpreter code raised |
+| `UnsupportedPlatformError` | Python < 3.12 or `_interpreters` unavailable (CPython only) |
+| `CExtIncompatibleError` | C-extension incompatible with sub-interpreters (`raise_on_cext=True`) |
+| `RuntimeError` | `eval_json()` / `run_string()` — sub-interpreter code raised an exception |
 
 ---
 

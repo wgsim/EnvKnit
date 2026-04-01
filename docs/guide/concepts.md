@@ -74,8 +74,9 @@ The CLI is a standalone Rust binary. It has no Python dependency. The Python lib
 Each version lives in its own isolated directory:
 `~/.envknit/packages/<name_lowercase>/<version>/`
 
-The CLI installs into these directories using `pip install --target <path>`. Multiple
-versions of the same package coexist without conflict because each gets its own directory.
+The CLI installs into these directories using `uv pip install --target <path>` (uv is
+required since v0.2.0). Multiple versions of the same package coexist without conflict
+because each gets its own directory.
 
 ### Why Not Virtual Environments?
 
@@ -227,22 +228,44 @@ Use `envknit.worker()` for C extension packages. See [Python API Guide](python-a
 EnvKnit's "In-process multi-version loading" (via `sys.meta_path` and `ContextVars`) provides unprecedented flexibility, but it fundamentally hacks Python's "one module per process" assumption. This creates several "Soft Isolation" limitations.
 
 ### 1. Type Checking and Object Compatibility
-Classes are identified by memory addresses. A `Response` class loaded from `requests v1` and another from `requests v2` are treated as completely different types.
-- **Symptom:** `isinstance(obj_from_v1, requests_v2.Response)` evaluates to `False`. This breaks frameworks relying on strict type checking (like Pydantic).
-- **Workaround:** Rely on Duck Typing and structural subtyping (`typing.Protocol`) across version boundaries.
+
+> ⛔ **PERMANENT LIMITATION** — Cannot be fixed in EnvKnit. Fundamental to CPython's type identity model.
+
+Classes are identified by memory address. A `Response` class from `requests v1` and from `requests v2` are completely different types.
+- **Symptom:** `isinstance(obj_from_v1, requests_v2.Response)` is `False`. Breaks Pydantic, SQLModel, etc.
+- **Workaround:** Exchange only primitives (`dict`, `list`, `str`, `int`) across version boundaries. Use duck typing (`typing.Protocol`) instead of `isinstance`.
 
 ### 2. Global State and Singleton Contamination
-While EnvKnit isolates the module routing, it **does not isolate Python's built-in objects**.
-- **Symptom:** If two versions of a package modify `logging` handlers, mutate `sys.modules`, or register themselves in a global singleton (e.g., SQLAlchemy's `MetaData`), they will overwrite each other's state.
 
-### 3. The Serialization (Pickle) Nightmare
-Python's `pickle` stores the literal import path of a class alongside its data.
-- **Symptom:** Serializing an object in a `v1` context and deserializing it in a `default` context leads to class mismatch errors.
-- **Workaround:** Never use `pickle` across version boundaries. Convert objects to basic DTOs (JSON, dictionaries) before passing them.
+> ⛔ **PERMANENT LIMITATION for `use()`**. Solved by `SubInterpreterEnv` (Python 3.12+).
 
-### 4. C-Extension In-Process Loading
-Packages with `.so` or `.pyd` files (NumPy, Pandas, etc.) are loaded by the OS dynamic linker (`dlopen`), making in-process multi-versioning impossible.
-- **Workaround:** EnvKnit forces the use of `envknit.worker()` (subprocess isolation) for these packages, which introduces IPC serialization overhead.
+`use()` isolates module routing but not Python built-in objects.
+- **Symptom:** Two package versions mutating `logging` handlers, `sys.modules`, or a global singleton (e.g., SQLAlchemy `MetaData`) overwrite each other.
+- **Workaround:** Use `SubInterpreterEnv` (Python 3.12+) for packages with global state conflicts.
+
+### 3. Cross-Version Object Serialization
+
+> ⛔ **PERMANENT LIMITATION** — Cross-version serialization by module path is fundamentally unsafe.
+
+Python's built-in serialization stores the literal import path of a class alongside its data.
+- **Symptom:** Serializing an object in a `v1` context and deserializing in a `default` context causes class mismatch errors.
+- **Workaround:** Never serialize across version boundaries by class path. Convert to DTOs (JSON, dicts) before passing between contexts.
+
+### 4. C-Extension In-Process Loading (Gen 1 `use()`)
+
+> ⛔ **PERMANENT LIMITATION for `use()`**. Use `use(auto_worker=True)` or `worker()` as the standard solution.
+
+C-extension packages (`.so` / `.pyd`) are loaded by the OS dynamic linker (`dlopen`). In-process multi-versioning is impossible.
+- **Easy workaround:** `use("numpy", "1.26.4", auto_worker=True)` — automatically falls back to subprocess worker when C-extension is detected.
+- **Explicit workaround:** `envknit.worker("numpy", "1.26.4")` for direct subprocess control.
+
+### 5. C-Extension Loading in `SubInterpreterEnv` (Gen 2)
+
+> ⛔ **PERMANENT LIMITATION** until C-extension authors adopt PEP 489 multi-phase init (numpy, pandas, torch — estimated 2027+).
+
+`SubInterpreterEnv` cannot load C-extensions with single-phase init.
+- **Detection:** `interp.try_import("numpy", raise_on_cext=True)` raises `CExtIncompatibleError`.
+- **Workaround:** Catch `CExtIncompatibleError`, fall back to `envknit.worker()` for that package.
 
 ---
 
@@ -256,10 +279,27 @@ Given these limitations, EnvKnit is not a silver bullet for every project. It sh
 
 ---
 
-## 🚀 The Gen 2 Roadmap: Towards "Hard Isolation"
-EnvKnit currently uses "Soft Isolation" (faking module caches). To solve the Global State and C-Extension problems permanently, the future roadmap targets **"Hard Isolation"**.
+## Gen 2: Hard Isolation via Sub-Interpreters (Available Now, Python 3.12+)
 
-**The Plan: Python 3.12+ Sub-interpreters (PEP 684)**
-By evolving the backend to leverage C-API level Per-Interpreter GILs, EnvKnit will be able to spawn true sub-interpreters instead of relying on `ContextVars`. 
-- Each sub-interpreter will have its own strictly isolated `sys.modules`, `logging` state, and memory space.
-- Combined with Multi-phase initialization (PEP 489), this will eventually allow C-Extensions to be loaded safely into the same process memory space without colliding.
+EnvKnit's Gen 1 `use()` API uses soft isolation (ContextVar-based module routing). For stronger isolation guarantees, **Gen 2 `SubInterpreterEnv` is available today** on Python 3.12+ CPython.
+
+`SubInterpreterEnv` spawns a true C-API sub-interpreter (PEP 684) with a completely independent `sys.modules`, `sys.path`, and GIL — solving limitations #2 (global state) that Gen 1 cannot address.
+
+```python
+from envknit import SubInterpreterEnv, CExtIncompatibleError
+
+with SubInterpreterEnv("ml") as interp:
+    interp.configure_from_lock("envknit.lock.yaml", env_name="ml")
+    result = interp.eval_json("import mylib; result = mylib.run()")
+```
+
+**What Gen 2 solves vs. Gen 1:**
+
+| Problem | Gen 1 `use()` | Gen 2 `SubInterpreterEnv` |
+|---|---|---|
+| Multiple package versions | ✅ | ✅ |
+| Global state isolation | ❌ Permanent | ✅ Solved |
+| C-extension multi-version | ❌ Permanent | ❌ Still permanent (use `worker()`) |
+| Python requirement | 3.10+ | 3.12+ CPython only |
+
+C-extension support in sub-interpreters requires PEP 489 multi-phase init adoption by each library. This is an upstream CPython ecosystem effort, not an EnvKnit limitation to fix. Estimated availability for major packages (numpy, pandas): 2027+.

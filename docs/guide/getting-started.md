@@ -3,11 +3,15 @@
 ## Prerequisites
 
 - Linux, macOS, or Windows
-- Python 3.10 or later (for the Python library)
+- **Python 3.10+** for `envknit.use()`, `envknit.worker()` — the core library
+- **Python 3.12+ CPython** additionally required for `SubInterpreterEnv` (Gen 2 hard isolation)
+- **[uv](https://docs.astral.sh/uv/)** — required for `envknit lock` and `envknit install` (v0.2.0+)
 - A shell (bash, zsh, fish, or PowerShell)
 
 Optional but recommended for Python version management: **mise** or **pyenv**.
 Optional but recommended for Node.js version management: **mise**, **fnm**, or **nvm**.
+
+> ⚠️ **Experimental project**: EnvKnit bypasses Python's "one module per process" assumption. Some features have permanent constraints that cannot be fixed (see [Known Limitations](concepts.md#known-limitations--the-road-ahead)). Not recommended for production use without fully understanding these constraints.
 
 ---
 
@@ -263,8 +267,7 @@ default
 
 1. `envknit init` created `envknit.yaml` — the dependency specification file.
 2. `envknit add` added package specs to `envknit.yaml`.
-3. `envknit lock` resolved exact versions (delegating to `uv pip compile` when uv is on
-   PATH, or falling back to the built-in resolver otherwise) and wrote
+3. `envknit lock` resolved exact versions (via uv, which is required since v0.2.0) and wrote
    `envknit.lock.yaml`. No packages were installed yet.
 4. `envknit install` read `envknit.lock.yaml` and installed each package into
    `~/.envknit/packages/<name>/<version>/` using `pip install --target`.
